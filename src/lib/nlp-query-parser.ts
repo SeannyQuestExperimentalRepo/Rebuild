@@ -21,6 +21,7 @@ import type {
   TrendFilter,
   FilterOperator,
 } from "./trend-engine";
+import type { PlayerTrendQuery } from "./player-trend-engine";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -28,6 +29,10 @@ import type {
 
 export interface ParsedQuery {
   trendQuery: TrendQuery;
+  /** Set when the query targets player-level data */
+  playerTrendQuery?: PlayerTrendQuery;
+  /** Which engine should handle this query */
+  queryType: "game" | "player";
   /** Human-readable interpretation of what the engine will search */
   interpretation: string;
   /** 0-1 confidence score */
@@ -245,6 +250,177 @@ Result: sport: "ALL",
 // OpenAI-powered parser
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Player query detection (local)
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect if a query is a player-level query by checking for player names,
+ * position keywords, and player-stat keywords.
+ */
+function detectPlayerQuery(query: string): ParsedQuery | null {
+  const q = query.toLowerCase().trim();
+
+  // Check for known player names
+  let playerName: string | undefined;
+  let playerPosition: string | undefined;
+
+  // Sort by alias length descending so multi-word names match first
+  const playerAliases = Object.keys(NFL_PLAYER_NAMES).sort(
+    (a, b) => b.length - a.length,
+  );
+  for (const alias of playerAliases) {
+    const regex = new RegExp(`\\b${escapeRegex(alias)}\\b`, "i");
+    if (regex.test(q)) {
+      playerName = NFL_PLAYER_NAMES[alias].name;
+      playerPosition = NFL_PLAYER_NAMES[alias].position;
+      break;
+    }
+  }
+
+  // Check for position keywords
+  let positionGroup: string | undefined;
+  const posAliases = Object.keys(POSITION_KEYWORDS).sort(
+    (a, b) => b.length - a.length,
+  );
+  for (const alias of posAliases) {
+    const regex = new RegExp(`\\b${escapeRegex(alias)}\\b`, "i");
+    if (regex.test(q)) {
+      positionGroup = POSITION_KEYWORDS[alias];
+      break;
+    }
+  }
+
+  // Check for player-stat keywords
+  const hasPlayerStatKeyword = PLAYER_STAT_KEYWORDS.some((kw) =>
+    q.includes(kw),
+  );
+
+  // Must have at least a player name, position keyword, or stat keyword
+  if (!playerName && !positionGroup && !hasPlayerStatKeyword) {
+    return null;
+  }
+
+  // Build filters from common patterns
+  const filters: TrendFilter[] = [];
+
+  // Temperature / cold weather
+  if (/\bcold\b/.test(q) || /\bfreezing\b/.test(q)) {
+    filters.push({ field: "temperature", operator: "lt", value: 40 });
+  }
+
+  // Primetime
+  if (/\bprime\s*time\b/.test(q)) {
+    filters.push({ field: "isPrimetime", operator: "eq", value: true });
+  }
+
+  // Playoffs
+  if (/\bplayoffs?\b/.test(q) || /\bpostseason\b/.test(q)) {
+    filters.push({ field: "isPlayoff", operator: "eq", value: true });
+  }
+
+  // Home / away
+  if (/\bhome\b/.test(q)) {
+    filters.push({ field: "isHome", operator: "eq", value: true });
+  } else if (/\baway\b/.test(q) || /\broad\b/.test(q)) {
+    filters.push({ field: "isHome", operator: "eq", value: false });
+  }
+
+  // Stat thresholds (e.g., "100+ rushing yards", "300 passing yards")
+  const statThreshold = q.match(
+    /(\d+)\+?\s*(passing|rushing|receiving|rush|pass|rec)\s*(yards?|yds?|tds?|touchdowns?)/i,
+  );
+  if (statThreshold) {
+    const threshold = parseInt(statThreshold[1], 10);
+    const statType = statThreshold[2].toLowerCase();
+    const statMetric = statThreshold[3].toLowerCase();
+
+    let field: string | null = null;
+    if (statType.startsWith("pass")) {
+      field = statMetric.startsWith("td") || statMetric.startsWith("touch")
+        ? "passing_tds" : "passing_yards";
+    } else if (statType.startsWith("rush")) {
+      field = statMetric.startsWith("td") || statMetric.startsWith("touch")
+        ? "rushing_tds" : "rushing_yards";
+    } else if (statType.startsWith("rec")) {
+      field = statMetric.startsWith("td") || statMetric.startsWith("touch")
+        ? "receiving_tds" : "receiving_yards";
+    }
+
+    if (field) {
+      filters.push({ field, operator: "gte", value: threshold });
+    }
+  }
+
+  // Season range detection
+  let seasonRange: [number, number] | undefined;
+  const sinceMatch = q.match(/\bsince\s+(\d{4})\b/);
+  if (sinceMatch) {
+    seasonRange = [parseInt(sinceMatch[1], 10), CURRENT_NFL_SEASON];
+  }
+  const lastYearsMatch = q.match(/\blast\s+(\d+)\s+years?\b/);
+  if (lastYearsMatch && !seasonRange) {
+    const n = parseInt(lastYearsMatch[1], 10);
+    seasonRange = [CURRENT_NFL_SEASON - (n - 1), CURRENT_NFL_SEASON];
+  }
+
+  // Team filter (opponent context: "against the Chiefs", "vs Bills")
+  let team: string | undefined;
+  let opponent: string | undefined;
+  const vsMatch = q.match(/\b(?:against|vs\.?|versus)\s+(?:the\s+)?(\w+)/i);
+  if (vsMatch) {
+    const oppAlias = vsMatch[1].toLowerCase();
+    const nflAliases = Object.keys(NFL_TEAMS).sort((a, b) => b.length - a.length);
+    for (const alias of nflAliases) {
+      if (oppAlias === alias || alias.includes(oppAlias)) {
+        opponent = NFL_TEAMS[alias];
+        break;
+      }
+    }
+  }
+
+  // If a player name was found alongside a team (not as opponent), treat as team filter
+  if (!playerName && !opponent) {
+    const nflAliases = Object.keys(NFL_TEAMS).sort((a, b) => b.length - a.length);
+    for (const alias of nflAliases) {
+      const regex = new RegExp(`\\b${escapeRegex(alias)}\\b`, "i");
+      if (regex.test(q)) {
+        team = NFL_TEAMS[alias];
+        break;
+      }
+    }
+  }
+
+  const playerTrendQuery: PlayerTrendQuery = {
+    player: playerName,
+    position: playerPosition,
+    positionGroup: positionGroup || undefined,
+    team,
+    opponent,
+    filters,
+    seasonRange,
+  };
+
+  // Build interpretation
+  const parts: string[] = [];
+  if (playerName) parts.push(playerName);
+  if (positionGroup && !playerName) parts.push(`${positionGroup}s`);
+  if (team) parts.push(`on ${team}`);
+  if (opponent) parts.push(`vs ${opponent}`);
+  if (seasonRange) parts.push(`${seasonRange[0]}-${seasonRange[1]}`);
+  for (const f of filters) {
+    parts.push(`${f.field} ${f.operator} ${JSON.stringify(f.value)}`);
+  }
+
+  return {
+    trendQuery: { sport: "NFL", filters: [] },
+    playerTrendQuery,
+    queryType: "player",
+    interpretation: `Player search: ${parts.join(", ")}`,
+    confidence: playerName ? 0.85 : 0.7,
+  };
+}
+
 /**
  * Parse a natural language betting trend query into a structured TrendQuery.
  *
@@ -258,11 +434,18 @@ export async function parseNaturalLanguageQuery(
   query: string,
 ): Promise<ParsedQuery> {
   try {
-    // Attempt local parse first to save an API call
+    // Check for player query first
+    const playerResult = detectPlayerQuery(query);
+    if (playerResult) {
+      return playerResult;
+    }
+
+    // Attempt local parse for game-level queries
     const localResult = parseQueryLocal(query);
     if (localResult) {
       return {
         trendQuery: localResult,
+        queryType: "game" as const,
         interpretation: buildLocalInterpretation(localResult, query),
         confidence: 0.75,
         suggestions: undefined,
@@ -418,7 +601,13 @@ function validateAndNormalize(
         )
       : undefined;
 
-  return {
+  // Detect if OpenAI returned a player query
+  const rawQueryType = obj?.queryType;
+  const isPlayerQuery = rawQueryType === "player" ||
+    (obj?.playerTrendQuery != null);
+  const queryType: "game" | "player" = isPlayerQuery ? "player" : "game";
+
+  const result: ParsedQuery = {
     trendQuery: {
       sport,
       team,
@@ -428,10 +617,29 @@ function validateAndNormalize(
       limit,
       orderBy,
     },
+    queryType,
     interpretation,
     confidence,
     suggestions,
   };
+
+  // If OpenAI detected a player query, extract the player fields
+  if (isPlayerQuery) {
+    const ptq = (obj?.playerTrendQuery ?? obj) as Record<string, unknown>;
+    result.playerTrendQuery = {
+      player: typeof ptq?.player === "string" ? ptq.player : undefined,
+      playerId: typeof ptq?.playerId === "string" ? ptq.playerId : undefined,
+      position: typeof ptq?.position === "string" ? ptq.position : undefined,
+      positionGroup: typeof ptq?.positionGroup === "string" ? ptq.positionGroup : undefined,
+      team: typeof ptq?.team === "string" ? ptq.team : undefined,
+      opponent: typeof ptq?.opponent === "string" ? ptq.opponent : undefined,
+      filters,
+      seasonRange,
+      limit,
+    };
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -444,11 +652,13 @@ function fallbackResult(query: string): ParsedQuery {
       sport: "ALL",
       filters: [],
     },
+    queryType: "game",
     interpretation: `Could not fully parse query. Showing all results for: "${query}"`,
     confidence: 0.1,
     suggestions: [
       "Try being more specific, e.g. 'NFL home favorites since 2020'",
       "Specify a sport: NFL, college football, or college basketball",
+      "Try a player query, e.g. 'Mahomes in cold weather'",
     ],
   };
 }
@@ -637,6 +847,112 @@ const COLLEGE_TEAMS: Set<string> = new Set([
   "maryland",
   "rutgers",
 ]);
+
+/**
+ * Well-known NFL player names for local detection.
+ * When a player name is detected, the query is routed to the player engine.
+ */
+const NFL_PLAYER_NAMES: Record<string, { name: string; position: string }> = {
+  // QBs
+  mahomes: { name: "Patrick Mahomes", position: "QB" },
+  "patrick mahomes": { name: "Patrick Mahomes", position: "QB" },
+  "josh allen": { name: "Josh Allen", position: "QB" },
+  allen: { name: "Josh Allen", position: "QB" },
+  "lamar jackson": { name: "Lamar Jackson", position: "QB" },
+  lamar: { name: "Lamar Jackson", position: "QB" },
+  "jalen hurts": { name: "Jalen Hurts", position: "QB" },
+  hurts: { name: "Jalen Hurts", position: "QB" },
+  "joe burrow": { name: "Joe Burrow", position: "QB" },
+  burrow: { name: "Joe Burrow", position: "QB" },
+  "dak prescott": { name: "Dak Prescott", position: "QB" },
+  dak: { name: "Dak Prescott", position: "QB" },
+  "tua tagovailoa": { name: "Tua Tagovailoa", position: "QB" },
+  tua: { name: "Tua Tagovailoa", position: "QB" },
+  "justin herbert": { name: "Justin Herbert", position: "QB" },
+  herbert: { name: "Justin Herbert", position: "QB" },
+  "trevor lawrence": { name: "Trevor Lawrence", position: "QB" },
+  "jordan love": { name: "Jordan Love", position: "QB" },
+  "brock purdy": { name: "Brock Purdy", position: "QB" },
+  purdy: { name: "Brock Purdy", position: "QB" },
+  "c.j. stroud": { name: "C.J. Stroud", position: "QB" },
+  stroud: { name: "C.J. Stroud", position: "QB" },
+  "jared goff": { name: "Jared Goff", position: "QB" },
+  goff: { name: "Jared Goff", position: "QB" },
+  "kirk cousins": { name: "Kirk Cousins", position: "QB" },
+  "baker mayfield": { name: "Baker Mayfield", position: "QB" },
+  "matthew stafford": { name: "Matthew Stafford", position: "QB" },
+  stafford: { name: "Matthew Stafford", position: "QB" },
+  "aaron rodgers": { name: "Aaron Rodgers", position: "QB" },
+  rodgers: { name: "Aaron Rodgers", position: "QB" },
+  "russell wilson": { name: "Russell Wilson", position: "QB" },
+  "caleb williams": { name: "Caleb Williams", position: "QB" },
+  "jayden daniels": { name: "Jayden Daniels", position: "QB" },
+  "drake maye": { name: "Drake Maye", position: "QB" },
+  // RBs
+  "derrick henry": { name: "Derrick Henry", position: "RB" },
+  "saquon barkley": { name: "Saquon Barkley", position: "RB" },
+  saquon: { name: "Saquon Barkley", position: "RB" },
+  "josh jacobs": { name: "Josh Jacobs", position: "RB" },
+  "bijan robinson": { name: "Bijan Robinson", position: "RB" },
+  bijan: { name: "Bijan Robinson", position: "RB" },
+  "breece hall": { name: "Breece Hall", position: "RB" },
+  "jahmyr gibbs": { name: "Jahmyr Gibbs", position: "RB" },
+  "jonathan taylor": { name: "Jonathan Taylor", position: "RB" },
+  "de'von achane": { name: "De'Von Achane", position: "RB" },
+  achane: { name: "De'Von Achane", position: "RB" },
+  "nick chubb": { name: "Nick Chubb", position: "RB" },
+  "alvin kamara": { name: "Alvin Kamara", position: "RB" },
+  kamara: { name: "Alvin Kamara", position: "RB" },
+  // WRs
+  "tyreek hill": { name: "Tyreek Hill", position: "WR" },
+  tyreek: { name: "Tyreek Hill", position: "WR" },
+  "ja'marr chase": { name: "Ja'Marr Chase", position: "WR" },
+  "jamarr chase": { name: "Ja'Marr Chase", position: "WR" },
+  "ceedee lamb": { name: "CeeDee Lamb", position: "WR" },
+  "justin jefferson": { name: "Justin Jefferson", position: "WR" },
+  jefferson: { name: "Justin Jefferson", position: "WR" },
+  "amon-ra st. brown": { name: "Amon-Ra St. Brown", position: "WR" },
+  "davante adams": { name: "Davante Adams", position: "WR" },
+  "a.j. brown": { name: "A.J. Brown", position: "WR" },
+  "stefon diggs": { name: "Stefon Diggs", position: "WR" },
+  "puka nacua": { name: "Puka Nacua", position: "WR" },
+  "nico collins": { name: "Nico Collins", position: "WR" },
+  "deebo samuel": { name: "Deebo Samuel", position: "WR" },
+  "dk metcalf": { name: "DK Metcalf", position: "WR" },
+  metcalf: { name: "DK Metcalf", position: "WR" },
+  "mike evans": { name: "Mike Evans", position: "WR" },
+  // TEs
+  "travis kelce": { name: "Travis Kelce", position: "TE" },
+  kelce: { name: "Travis Kelce", position: "TE" },
+  "mark andrews": { name: "Mark Andrews", position: "TE" },
+  "george kittle": { name: "George Kittle", position: "TE" },
+  kittle: { name: "George Kittle", position: "TE" },
+  "sam laporta": { name: "Sam LaPorta", position: "TE" },
+  "dallas goedert": { name: "Dallas Goedert", position: "TE" },
+  "t.j. hockenson": { name: "T.J. Hockenson", position: "TE" },
+  // Kickers
+  "justin tucker": { name: "Justin Tucker", position: "K" },
+  tucker: { name: "Justin Tucker", position: "K" },
+};
+
+// Position keywords that indicate a player query
+const POSITION_KEYWORDS: Record<string, string> = {
+  qb: "QB", qbs: "QB", quarterback: "QB", quarterbacks: "QB",
+  rb: "RB", rbs: "RB", "running back": "RB", "running backs": "RB",
+  wr: "WR", wrs: "WR", "wide receiver": "WR", "wide receivers": "WR", receiver: "WR", receivers: "WR",
+  te: "TE", tes: "TE", "tight end": "TE", "tight ends": "TE",
+  k: "K", kicker: "K", kickers: "K",
+};
+
+// Player stat keywords that indicate a player query
+const PLAYER_STAT_KEYWORDS = [
+  "passing yards", "pass yards", "completions", "passer rating",
+  "rushing yards", "rush yards", "carries",
+  "receiving yards", "rec yards", "receptions", "catches", "targets",
+  "touchdowns", "tds", "interceptions", "ints",
+  "fantasy points", "fantasy", "sacks", "tackles",
+  "snap count", "snaps", "target share",
+];
 
 /**
  * Attempt to parse a natural language query using only regex and keyword

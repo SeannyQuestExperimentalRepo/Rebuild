@@ -625,7 +625,7 @@ function resolveField(game: TrendGame, field: string): unknown {
 /**
  * Evaluate a single filter operator against a game field value.
  */
-function evaluateOperator(
+export function evaluateOperator(
   fieldValue: unknown,
   operator: FilterOperator,
   filterValue: unknown
