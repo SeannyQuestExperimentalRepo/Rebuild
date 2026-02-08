@@ -7,4 +7,327 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Schema will be expanded in Phase 0, Cycle 4-8
+// ─── ENUMS ──────────────────────────────────────────────────────────────────
+
+enum Sport {
+  NFL
+  NCAAF
+  NCAAMB
+}
+
+enum VenueType {
+  OUTDOOR
+  DOME
+  RETRACTABLE
+}
+
+enum SpreadResult {
+  COVERED
+  LOST
+  PUSH
+}
+
+enum OUResult {
+  OVER
+  UNDER
+  PUSH
+}
+
+enum WeatherCategory {
+  CLEAR
+  CLOUDY
+  RAIN
+  SNOW
+  WIND
+  FOG
+  DOME
+  RETRACTABLE_CLOSED
+  RETRACTABLE_OPEN
+}
+
+enum UserRole {
+  FREE
+  PREMIUM
+  ADMIN
+}
+
+// ─── TEAM ───────────────────────────────────────────────────────────────────
+
+model Team {
+  id           Int       @id @default(autoincrement())
+  name         String    // "Kansas City Chiefs"
+  abbreviation String    // "KC"
+  sport        Sport
+  conference   String    // "AFC", "Big 12", "SEC"
+  division     String?   // "West" — nullable for college
+  venue        String?   // "GEHA Field at Arrowhead Stadium"
+  venueType    VenueType @default(OUTDOOR)
+  city         String
+  state        String
+  latitude     Float?    // For weather API lookups
+  longitude    Float?
+  createdAt    DateTime  @default(now())
+
+  // NFL relations
+  nflHomeGames NFLGame[] @relation("NFLHomeTeam")
+  nflAwayGames NFLGame[] @relation("NFLAwayTeam")
+  nflWins      NFLGame[] @relation("NFLWinner")
+
+  // NCAAF relations
+  ncaafHomeGames NCAAFGame[] @relation("NCAAFHomeTeam")
+  ncaafAwayGames NCAAFGame[] @relation("NCAAFAwayTeam")
+  ncaafWins      NCAAFGame[] @relation("NCAAFWinner")
+
+  // NCAAMB relations
+  ncaambHomeGames NCAAMBGame[] @relation("NCAAMBHomeTeam")
+  ncaambAwayGames NCAAMBGame[] @relation("NCAAMBAwayTeam")
+  ncaambWins      NCAAMBGame[] @relation("NCAAMBWinner")
+
+  @@index([sport])
+  @@index([sport, conference])
+}
+
+// ─── NFL GAMES ──────────────────────────────────────────────────────────────
+
+model NFLGame {
+  id              Int              @id @default(autoincrement())
+  season          Int
+  week            String           // "1"-"18", "WildCard", "Division", "ConfChamp", "SuperBowl"
+  dayOfWeek       String           // "Sun", "Mon", "Thu", "Sat", "Fri"
+  gameDate        DateTime
+  kickoffTime     String?          // "8:20 PM" ET
+  homeTeamId      Int
+  homeTeam        Team             @relation("NFLHomeTeam", fields: [homeTeamId], references: [id])
+  awayTeamId      Int
+  awayTeam        Team             @relation("NFLAwayTeam", fields: [awayTeamId], references: [id])
+  homeScore       Int?
+  awayScore       Int?
+  scoreDifference Int?             // homeScore - awayScore (signed: positive = home win)
+  winnerId        Int?
+  winner          Team?            @relation("NFLWinner", fields: [winnerId], references: [id])
+  isPrimetime     Boolean          @default(false)
+  primetimeSlot   String?          // "MNF", "SNF", "TNF", "Saturday Primetime"
+  temperature     Float?           // °F
+  windMph         Float?           // Parsed numeric
+  weatherCategory WeatherCategory?
+  weatherRaw      String?          // Original freeform text
+  spread          Float?           // Negative = home favored
+  overUnder       Float?           // Total points line
+  spreadResult    SpreadResult?
+  ouResult        OUResult?
+  isPlayoff       Boolean          @default(false)
+  isNeutralSite   Boolean          @default(false)
+  source          String?          // Data provenance
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@unique([gameDate, homeTeamId, awayTeamId])
+  @@index([season, week])
+  @@index([homeTeamId])
+  @@index([awayTeamId])
+  @@index([gameDate])
+  @@index([isPrimetime])
+  @@index([spread])
+  @@index([weatherCategory])
+  @@index([isPlayoff])
+  @@index([isPrimetime, spread])
+  @@index([weatherCategory, spread])
+  @@index([dayOfWeek, spread])
+  @@index([isPlayoff, spread])
+  @@index([season, homeTeamId, spread])
+}
+
+// ─── NCAAF GAMES ────────────────────────────────────────────────────────────
+
+model NCAAFGame {
+  id               Int              @id @default(autoincrement())
+  season           Int
+  week             String           // "1"-"15+", "Bowl", "CFP"
+  dayOfWeek        String
+  gameDate         DateTime
+  kickoffTime      String?
+  homeTeamId       Int
+  homeTeam         Team             @relation("NCAAFHomeTeam", fields: [homeTeamId], references: [id])
+  awayTeamId       Int
+  awayTeam         Team             @relation("NCAAFAwayTeam", fields: [awayTeamId], references: [id])
+  homeScore        Int?
+  awayScore        Int?
+  scoreDifference  Int?             // homeScore - awayScore (signed)
+  winnerId         Int?
+  winner           Team?            @relation("NCAAFWinner", fields: [winnerId], references: [id])
+  homeRank         Int?             // AP ranking at game time
+  awayRank         Int?
+  isConferenceGame Boolean          @default(false)
+  isBowlGame       Boolean          @default(false)
+  bowlName         String?          // "Rose Bowl", "CFP Semifinal", etc.
+  isPrimetime      Boolean          @default(false)
+  primetimeSlot    String?
+  temperature      Float?
+  windMph          Float?
+  weatherCategory  WeatherCategory?
+  weatherRaw       String?
+  spread           Float?           // Negative = home favored
+  overUnder        Float?
+  spreadResult     SpreadResult?
+  ouResult         OUResult?
+  isPlayoff        Boolean          @default(false) // CFP games
+  isNeutralSite    Boolean          @default(false)
+  source           String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@unique([gameDate, homeTeamId, awayTeamId])
+  @@index([season, week])
+  @@index([homeTeamId])
+  @@index([awayTeamId])
+  @@index([gameDate])
+  @@index([spread])
+  @@index([isConferenceGame])
+  @@index([isBowlGame])
+  @@index([homeRank])
+  @@index([awayRank])
+  @@index([weatherCategory, spread])
+  @@index([season, homeTeamId, spread])
+}
+
+// ─── NCAAMB GAMES ───────────────────────────────────────────────────────────
+
+model NCAAMBGame {
+  id               Int           @id @default(autoincrement())
+  season           Int           // Year the season ends (2024 = 2023-24 season)
+  gameDate         DateTime
+  tipoffTime       String?
+  homeTeamId       Int
+  homeTeam         Team          @relation("NCAAMBHomeTeam", fields: [homeTeamId], references: [id])
+  awayTeamId       Int
+  awayTeam         Team          @relation("NCAAMBAwayTeam", fields: [awayTeamId], references: [id])
+  homeScore        Int?
+  awayScore        Int?
+  scoreDifference  Int?          // homeScore - awayScore (signed)
+  winnerId         Int?
+  winner           Team?         @relation("NCAAMBWinner", fields: [winnerId], references: [id])
+  homeRank         Int?          // AP ranking at game time
+  awayRank         Int?
+  homeSeed         Int?          // NCAA tournament seed (1-16)
+  awaySeed         Int?
+  isConferenceGame Boolean       @default(false)
+  isNeutralSite    Boolean       @default(false)
+  isTournament     Boolean       @default(false) // NCAA March Madness
+  tournamentRound  String?       // "First Four", "Round of 64", "Sweet 16", etc.
+  tournamentRegion String?       // "East", "West", "South", "Midwest"
+  isNIT            Boolean       @default(false)
+  isConferenceTourney Boolean    @default(false)
+  spread           Float?        // Negative = home favored
+  overUnder        Float?
+  spreadResult     SpreadResult?
+  ouResult         OUResult?
+  // NO weather fields — basketball is indoors
+  source           String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@unique([gameDate, homeTeamId, awayTeamId])
+  @@index([season])
+  @@index([homeTeamId])
+  @@index([awayTeamId])
+  @@index([gameDate])
+  @@index([spread])
+  @@index([isTournament])
+  @@index([isTournament, tournamentRound])
+  @@index([isConferenceGame])
+  @@index([season, homeTeamId, spread])
+}
+
+// ─── UPCOMING GAMES (Live odds + weather forecasts) ─────────────────────────
+
+model UpcomingGame {
+  id               Int              @id @default(autoincrement())
+  sport            Sport
+  gameDate         DateTime
+  homeTeam         String           // Store as string for flexibility
+  awayTeam         String
+  spread           Float?           // Current consensus spread
+  overUnder        Float?
+  moneylineHome    Int?             // e.g., -150
+  moneylineAway    Int?             // e.g., +130
+  forecastTemp     Float?
+  forecastWindMph  Float?
+  forecastCategory WeatherCategory?
+  forecastUpdated  DateTime?
+  lastUpdated      DateTime         @updatedAt
+
+  @@unique([sport, gameDate, homeTeam, awayTeam])
+  @@index([sport, gameDate])
+}
+
+// ─── AUTH (NextAuth.js v5) ──────────────────────────────────────────────────
+
+model User {
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  name               String?
+  image              String?
+  role               UserRole  @default(FREE)
+  subscriptionId     String?
+  subscriptionStatus String?
+  emailVerified      DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  accounts           Account[]
+  sessions           Session[]
+  searches           SearchLog[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── SEARCH LOGGING ─────────────────────────────────────────────────────────
+
+model SearchLog {
+  id        Int      @id @default(autoincrement())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  query     String   // Raw natural language query
+  sport     Sport?
+  filters   String?  // JSON of interpreted filters
+  results   Int      // Number of results returned
+  durationMs Int?    // Query execution time
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+}
