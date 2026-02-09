@@ -10,6 +10,15 @@ const nextConfig = {
         "./data",
       ],
     },
+    // Force-include Next.js internal modules that file tracing misses
+    // when building locally with `vercel build --prod`.
+    // Without this, serverless functions crash with missing module errors
+    // (get-metadata-route, hash, match-next-data-pathname, etc.).
+    outputFileTracingIncludes: {
+      "*": [
+        "./node_modules/next/dist/**/*.js",
+      ],
+    },
   },
 };
 
