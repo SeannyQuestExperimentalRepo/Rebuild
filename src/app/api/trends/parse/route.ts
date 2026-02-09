@@ -11,6 +11,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseNaturalLanguageQuery } from "@/lib/nlp-query-parser";
 
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 export async function POST(request: NextRequest) {
   const start = performance.now();
 

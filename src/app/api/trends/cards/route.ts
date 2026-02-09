@@ -28,6 +28,9 @@ import {
   generatePropTrendCard,
 } from "@/lib/trend-card-generator";
 
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 // --- Zod Schemas ---
 
 const FilterSchema = z.object({

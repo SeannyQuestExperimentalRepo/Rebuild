@@ -8,6 +8,9 @@
 import { NextResponse } from "next/server";
 import { loadGamesBySportCached, type TrendGame } from "@/lib/trend-engine";
 
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 // --- Helpers (outside handler to avoid strict-mode block issues) ---
 
 function getSeasonRange(games: TrendGame[]): [number, number] | null {

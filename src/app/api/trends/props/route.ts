@@ -17,6 +17,9 @@ import {
   type PropResult,
 } from "@/lib/prop-trend-engine";
 
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 // --- Zod Schemas ---
 
 const FilterOperatorSchema = z.enum([

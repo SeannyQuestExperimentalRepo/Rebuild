@@ -16,6 +16,9 @@ import {
   type ReverseLookupOptions,
 } from "@/lib/reverse-lookup-engine";
 
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 // --- Zod Schemas ---
 
 const AngleCategorySchema = z.enum([

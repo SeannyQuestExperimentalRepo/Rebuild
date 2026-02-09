@@ -19,6 +19,10 @@ import {
 } from "@/lib/trend-engine";
 import { enrichGameSummary } from "@/lib/significance-enrichment";
 
+// Vercel serverless config
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 // --- Zod Schemas ---
 
 const FilterOperatorSchema = z.enum([

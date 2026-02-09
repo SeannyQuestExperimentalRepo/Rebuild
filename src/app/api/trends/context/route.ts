@@ -14,6 +14,9 @@ import {
   getMatchupContext,
 } from "@/lib/game-context-engine";
 
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 function errorResponse(message: string, status: number) {
   return NextResponse.json({ success: false, error: message }, { status });
 }

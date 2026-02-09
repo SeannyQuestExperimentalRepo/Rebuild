@@ -15,6 +15,9 @@ import {
 } from "@/lib/player-trend-engine";
 import { enrichPlayerSummary } from "@/lib/significance-enrichment";
 
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 // --- Zod Schemas ---
 
 const FilterOperatorSchema = z.enum([
