@@ -253,7 +253,8 @@ function getSeason(date: Date, sport: Sport): number {
   return month <= 2 ? year - 1 : year;
 }
 
-/** Insert a completed game into the appropriate sport table */
+/** Insert a completed game into the appropriate sport table.
+ *  Returns true if inserted, false if duplicate or unsupported sport. */
 async function insertCompletedGame(
   sport: Sport,
   homeTeamId: number,
@@ -266,8 +267,13 @@ async function insertCompletedGame(
 ): Promise<boolean> {
   const season = getSeason(gameDate, sport);
 
+  // Check for existing game first to avoid noisy unique-constraint errors
+  const dupeWhere = { gameDate, homeTeamId, awayTeamId };
+
   switch (sport) {
-    case "NFL":
+    case "NFL": {
+      const existing = await prisma.nFLGame.findFirst({ where: dupeWhere });
+      if (existing) return false;
       await prisma.nFLGame.create({
         data: {
           season,
@@ -281,8 +287,11 @@ async function insertCompletedGame(
         },
       });
       return true;
+    }
 
-    case "NCAAF":
+    case "NCAAF": {
+      const existing = await prisma.nCAAFGame.findFirst({ where: dupeWhere });
+      if (existing) return false;
       await prisma.nCAAFGame.create({
         data: {
           season,
@@ -298,8 +307,11 @@ async function insertCompletedGame(
         },
       });
       return true;
+    }
 
-    case "NCAAMB":
+    case "NCAAMB": {
+      const existing = await prisma.nCAAMBGame.findFirst({ where: dupeWhere });
+      if (existing) return false;
       await prisma.nCAAMBGame.create({
         data: {
           season,
@@ -313,6 +325,7 @@ async function insertCompletedGame(
         },
       });
       return true;
+    }
 
     default:
       return false;

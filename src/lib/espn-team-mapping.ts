@@ -46,31 +46,55 @@ export const espnOverrides: Record<string, Record<string, string>> = {
   },
 
   NCAAMB: {
-    // ESPN → TrendLine canonical
+    // ESPN → TrendLine canonical (must match Team table name exactly)
     "UConn Huskies": "Connecticut",
     "UCONN": "Connecticut",
     "UConn": "Connecticut",
     "Hawai'i Rainbow Warriors": "Hawaii",
     "HAW": "Hawaii",
-    "Miami Hurricanes": "Miami",
-    "Miami (OH) RedHawks": "Miami (OH)",
+
+    // Miami: DB uses "Miami FL" and "Miami OH"
+    "Miami Hurricanes": "Miami FL",
+    "Miami": "Miami FL",
+    "MIA": "Miami FL",
+    "Miami (OH) RedHawks": "Miami OH",
+    "M-OH": "Miami OH",
+
     "Saint Joseph's Hawks": "Saint Joseph's",
     "Saint Mary's Gaels": "Saint Mary's",
     "St. John's Red Storm": "St. John's",
-    "St. Bonaventure Bonnies": "St. Bonaventure",
+
+    // DB uses "Saint Bonaventure" (not "St. Bonaventure")
+    "St. Bonaventure Bonnies": "Saint Bonaventure",
+    "St. Bonaventure": "Saint Bonaventure",
+    "SBU": "Saint Bonaventure",
+
     "Loyola Chicago Ramblers": "Loyola Chicago",
     "UNC Tar Heels": "North Carolina",
     "North Carolina Tar Heels": "North Carolina",
-    "NC State Wolfpack": "NC State",
-    "UL Monroe Warhawks": "Louisiana-Monroe",
-    "ULM": "Louisiana-Monroe",
+
+    // DB uses "N.C. State" (not "NC State")
+    "NC State Wolfpack": "N.C. State",
+    "NC State": "N.C. State",
+    "NCST": "N.C. State",
+
+    // DB uses "Louisiana Monroe" (no hyphen)
+    "UL Monroe Warhawks": "Louisiana Monroe",
+    "Louisiana-Monroe Warhawks": "Louisiana Monroe",
+    "Louisiana-Monroe": "Louisiana Monroe",
+    "ULM": "Louisiana Monroe",
+
     "Louisiana Ragin' Cajuns": "Louisiana",
     "ULL": "Louisiana",
     "USC Trojans": "USC",
     "LSU Tigers": "LSU",
     "UNLV Rebels": "UNLV",
-    "Ole Miss Rebels": "Ole Miss",
-    "MISS": "Ole Miss",
+
+    // DB uses "Mississippi" (not "Ole Miss")
+    "Ole Miss Rebels": "Mississippi",
+    "Ole Miss": "Mississippi",
+    "MISS": "Mississippi",
+
     "SMU Mustangs": "SMU",
     "UCF Knights": "UCF",
     "UTSA Roadrunners": "UTSA",
@@ -80,27 +104,102 @@ export const espnOverrides: Record<string, Record<string, string>> = {
     "FIU Panthers": "FIU",
     "Middle Tennessee Blue Raiders": "Middle Tennessee",
     "MTSU": "Middle Tennessee",
-    "Appalachian State Mountaineers": "Appalachian State",
-    "APP": "Appalachian State",
-    "AR-Pine Bluff": "Arkansas-Pine Bluff",
-    "UAPB": "Arkansas-Pine Bluff",
-    "Chicago St": "Chicago State",
-    "CHST": "Chicago State",
-    "Jackson St": "Jackson State",
-    "JKST": "Jackson State",
+
+    // DB uses "Appalachian St." (not "Appalachian State")
+    "Appalachian State Mountaineers": "Appalachian St.",
+    "Appalachian State": "Appalachian St.",
+    "APP": "Appalachian St.",
+
+    // DB uses "Arkansas Pine Bluff" (no hyphen)
+    "AR-Pine Bluff": "Arkansas Pine Bluff",
+    "Arkansas-Pine Bluff Golden Lions": "Arkansas Pine Bluff",
+    "Arkansas-Pine Bluff": "Arkansas Pine Bluff",
+    "UAPB": "Arkansas Pine Bluff",
+
+    // DB uses "Chicago St."
+    "Chicago St": "Chicago St.",
+    "Chicago State Cougars": "Chicago St.",
+    "Chicago State": "Chicago St.",
+    "CHST": "Chicago St.",
+
+    // DB uses "Jackson St."
+    "Jackson St": "Jackson St.",
+    "Jackson State Tigers": "Jackson St.",
+    "Jackson State": "Jackson St.",
+    "JKST": "Jackson St.",
+
     "UT Rio Grande Valley Vaqueros": "UT Rio Grande Valley",
     "RGV": "UT Rio Grande Valley",
     "East Texas A&M Lions": "East Texas A&M",
     "ETAM": "East Texas A&M",
-    "Texas A&M-Corpus Christi Islanders": "Texas A&M-Corpus Christi",
-    "AMCC": "Texas A&M-Corpus Christi",
+
+    // DB uses "Texas A&M Corpus Chris" (no hyphen, truncated)
+    "Texas A&M-Corpus Christi Islanders": "Texas A&M Corpus Chris",
+    "Texas A&M-Corpus Christi": "Texas A&M Corpus Chris",
+    "AMCC": "Texas A&M Corpus Chris",
+
     "Bethune-Cookman Wildcats": "Bethune Cookman",
     "BCU": "Bethune Cookman",
-    "Indiana St": "Indiana State",
-    "INST": "Indiana State",
+
+    // DB uses "Indiana St."
+    "Indiana St": "Indiana St.",
+    "Indiana State Sycamores": "Indiana St.",
+    "Indiana State": "Indiana St.",
+    "INST": "Indiana St.",
+
     "SE Louisiana": "Southeastern Louisiana",
     "SELA": "Southeastern Louisiana",
     "S Illinois": "Southern Illinois",
     "SIU": "Southern Illinois",
+
+    // UC schools — DB uses full names with spaces
+    "UC Davis Aggies": "UC Davis",
+    "DAV": "UC Davis",
+    "UC Irvine Anteaters": "UC Irvine",
+    "UCI": "UC Irvine",
+    "UC Riverside Highlanders": "UC Riverside",
+    "UCR": "UC Riverside",
+    "UC San Diego Tritons": "UC San Diego",
+    "UCSD": "UC San Diego",
+
+    // Queens — DB uses "Queens (NC)"
+    "Queens Royals": "Queens (NC)",
+    "Queens": "Queens (NC)",
+    "QUNS": "Queens (NC)",
+
+    // Seattle — DB uses "Seattle"
+    "Seattle U Redhawks": "Seattle",
+    "Seattle U": "Seattle",
+    "SEA": "Seattle",
+
+    // Merrimack — DB uses "Merrimack"
+    "Merrimack Warriors": "Merrimack",
+    "MRMK": "Merrimack",
+
+    // West Georgia — DB uses "West Georgia"
+    "West Georgia Wolves": "West Georgia",
+    "WGA": "West Georgia",
+
+    // Southern Indiana — DB uses "Southern Indiana"
+    "Southern Indiana Screaming Eagles": "Southern Indiana",
+    "USI": "Southern Indiana",
+
+    // Purdue Fort Wayne — DB uses "Purdue Fort Wayne"
+    "Purdue Fort Wayne Mastodons": "Purdue Fort Wayne",
+    "PFW": "Purdue Fort Wayne",
+
+    // UAlbany — DB uses "Albany"
+    "UAlbany Great Danes": "Albany",
+    "UAlbany": "Albany",
+    "UALB": "Albany",
+
+    // St. Thomas-Minnesota — DB uses "St. Thomas"
+    "St. Thomas-Minnesota Tommies": "St. Thomas",
+    "St. Thomas-Minnesota": "St. Thomas",
+    "STMN": "St. Thomas",
+
+    // New Haven — DB uses "New Haven" (if D2, will skip at team ID lookup)
+    "New Haven Chargers": "New Haven",
+    "NHVN": "New Haven",
   },
 };
