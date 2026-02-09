@@ -86,24 +86,49 @@ const ODDS_URLS: Record<Sport, string> = {
 };
 
 const FETCH_TIMEOUT = 10_000; // 10 seconds
+const MAX_RETRIES = 3;
 
 // ─── Fetch Helpers ──────────────────────────────────────────────────────────
 
-async function fetchJSON<T>(url: string): Promise<T> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
-  try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: { "User-Agent": "TrendLine/1.0" },
-    });
-    if (!res.ok) {
-      throw new Error(`ESPN API ${res.status}: ${res.statusText}`);
+async function fetchJSON<T>(url: string, retries = MAX_RETRIES): Promise<T> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+    try {
+      const res = await fetch(url, {
+        signal: controller.signal,
+        headers: { "User-Agent": "TrendLine/1.0" },
+      });
+      if (!res.ok) {
+        // Don't retry 4xx client errors (except 429 rate limit)
+        if (res.status >= 400 && res.status < 500 && res.status !== 429) {
+          throw new Error(`ESPN API ${res.status}: ${res.statusText}`);
+        }
+        throw new Error(`ESPN API ${res.status}: ${res.statusText}`);
+      }
+      return (await res.json()) as T;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      // Don't retry 4xx client errors (except 429)
+      if (lastError.message.includes("ESPN API 4") && !lastError.message.includes("429")) {
+        throw lastError;
+      }
+      if (attempt < retries - 1) {
+        const delay = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s
+        console.warn(
+          `[ESPN] Fetch attempt ${attempt + 1}/${retries} failed, retrying in ${delay}ms:`,
+          lastError.message,
+        );
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    } finally {
+      clearTimeout(timeout);
     }
-    return (await res.json()) as T;
-  } finally {
-    clearTimeout(timeout);
   }
+
+  throw lastError ?? new Error("ESPN API fetch failed after retries");
 }
 
 // ─── Scoreboard ─────────────────────────────────────────────────────────────

@@ -12,6 +12,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { syncCompletedGames, refreshUpcomingGames } from "@/lib/espn-sync";
+import { clearGameCache } from "@/lib/trend-engine";
 import type { Sport } from "@/lib/espn-api";
 
 export const dynamic = "force-dynamic";
@@ -20,16 +21,20 @@ export const maxDuration = 60;
 const SPORTS: Sport[] = ["NFL", "NCAAF", "NCAAMB"];
 
 export async function POST(request: NextRequest) {
-  // Verify cron secret
+  // Verify cron secret (fail-closed: reject if not configured)
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authHeader = request.headers.get("authorization");
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 },
-      );
-    }
+  if (!cronSecret) {
+    return NextResponse.json(
+      { success: false, error: "CRON_SECRET not configured" },
+      { status: 500 },
+    );
+  }
+  const authHeader = request.headers.get("authorization");
+  if (authHeader !== `Bearer ${cronSecret}`) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 },
+    );
   }
 
   const start = performance.now();
@@ -61,6 +66,10 @@ export async function POST(request: NextRequest) {
         };
       }
     }
+
+    // 3. Invalidate in-memory game cache so new data is visible
+    clearGameCache();
+    console.log("[Cron] Game cache cleared after sync");
 
     const durationMs = Math.round(performance.now() - start);
 

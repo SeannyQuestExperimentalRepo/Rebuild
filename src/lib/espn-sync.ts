@@ -11,6 +11,7 @@
  */
 
 import { prisma } from "./db";
+import { SpreadResult, OUResult } from "@prisma/client";
 import {
   fetchUpcomingWithOdds,
   fetchScoreboard,
@@ -163,6 +164,16 @@ export async function syncCompletedGames(
       continue;
     }
 
+    const gameDate = new Date(game.date);
+
+    // Look up pre-game odds from UpcomingGame table (captured before game started)
+    const upcomingOdds = await lookupUpcomingGameOdds(
+      sport,
+      homeCanonical,
+      awayCanonical,
+      gameDate,
+    );
+
     try {
       const success = await insertCompletedGame(
         sport,
@@ -170,9 +181,11 @@ export async function syncCompletedGames(
         awayId,
         homeScore,
         awayScore,
-        new Date(game.date),
+        gameDate,
         game.homeTeam.rank,
         game.awayTeam.rank,
+        upcomingOdds?.spread ?? null,
+        upcomingOdds?.overUnder ?? null,
       );
       if (success) inserted++;
       else skipped++;
@@ -199,12 +212,12 @@ export function calculateSpreadResult(
   homeScore: number,
   awayScore: number,
   spread: number | null,
-): string | null {
+): SpreadResult | null {
   if (spread == null) return null;
   const margin = homeScore - awayScore + spread;
-  if (margin > 0) return "COVERED";
-  if (margin < 0) return "LOST";
-  return "PUSH";
+  if (margin > 0) return SpreadResult.COVERED;
+  if (margin < 0) return SpreadResult.LOST;
+  return SpreadResult.PUSH;
 }
 
 /** Calculate over/under result. Exported for future use. */
@@ -212,12 +225,54 @@ export function calculateOUResult(
   homeScore: number,
   awayScore: number,
   overUnder: number | null,
-): string | null {
+): OUResult | null {
   if (overUnder == null) return null;
   const total = homeScore + awayScore;
-  if (total > overUnder) return "OVER";
-  if (total < overUnder) return "UNDER";
-  return "PUSH";
+  if (total > overUnder) return OUResult.OVER;
+  if (total < overUnder) return OUResult.UNDER;
+  return OUResult.PUSH;
+}
+
+/** Look up pre-game odds from UpcomingGame table for a completed game */
+async function lookupUpcomingGameOdds(
+  sport: Sport,
+  homeTeam: string,
+  awayTeam: string,
+  gameDate: Date,
+): Promise<{ spread: number | null; overUnder: number | null } | null> {
+  try {
+    // Match by sport + teams, allow ±1 day for timezone differences
+    const dayBefore = new Date(gameDate);
+    dayBefore.setDate(dayBefore.getDate() - 1);
+    const dayAfter = new Date(gameDate);
+    dayAfter.setDate(dayAfter.getDate() + 1);
+
+    const upcoming = await prisma.upcomingGame.findFirst({
+      where: {
+        sport,
+        homeTeam,
+        awayTeam,
+        gameDate: { gte: dayBefore, lte: dayAfter },
+      },
+      select: { spread: true, overUnder: true },
+    });
+
+    return upcoming;
+  } catch {
+    return null;
+  }
+}
+
+/** Approximate week number for NFL/NCAAF from game date and season */
+function getWeek(gameDate: Date, sport: Sport, season: number): string {
+  if (sport === "NCAAMB") return "0"; // NCAAMB doesn't use weeks
+  // NFL/NCAAF: approximate week from season start (early September)
+  const seasonStart = new Date(season, 8, 1); // Sep 1
+  const diffDays = Math.floor(
+    (gameDate.getTime() - seasonStart.getTime()) / 86400000,
+  );
+  const week = Math.max(1, Math.ceil(diffDays / 7));
+  return String(week);
 }
 
 /** Build a map of "SPORT:canonicalName" → team ID */
@@ -254,7 +309,8 @@ function getSeason(date: Date, sport: Sport): number {
 }
 
 /** Insert a completed game into the appropriate sport table.
- *  Returns true if inserted, false if duplicate or unsupported sport. */
+ *  Returns true if inserted, false if duplicate or unsupported sport.
+ *  Now accepts pre-game odds from UpcomingGame table and calculates results. */
 async function insertCompletedGame(
   sport: Sport,
   homeTeamId: number,
@@ -264,8 +320,15 @@ async function insertCompletedGame(
   gameDate: Date,
   homeRank: number | null = null,
   awayRank: number | null = null,
+  spread: number | null = null,
+  overUnder: number | null = null,
 ): Promise<boolean> {
   const season = getSeason(gameDate, sport);
+  const week = getWeek(gameDate, sport, season);
+
+  // Calculate spread and O/U results if odds available
+  const spreadResult = calculateSpreadResult(homeScore, awayScore, spread);
+  const ouResult = calculateOUResult(homeScore, awayScore, overUnder);
 
   // Check for existing game first to avoid noisy unique-constraint errors
   const dupeWhere = { gameDate, homeTeamId, awayTeamId };
@@ -277,13 +340,17 @@ async function insertCompletedGame(
       await prisma.nFLGame.create({
         data: {
           season,
-          week: "0", // Unknown from ESPN, will be updated if needed
+          week,
           dayOfWeek: gameDate.toLocaleDateString("en-US", { weekday: "long" }),
           gameDate,
           homeTeamId,
           awayTeamId,
           homeScore,
           awayScore,
+          spread,
+          overUnder,
+          spreadResult,
+          ouResult,
         },
       });
       return true;
@@ -295,7 +362,7 @@ async function insertCompletedGame(
       await prisma.nCAAFGame.create({
         data: {
           season,
-          week: "0",
+          week,
           dayOfWeek: gameDate.toLocaleDateString("en-US", { weekday: "long" }),
           gameDate,
           homeTeamId,
@@ -304,6 +371,10 @@ async function insertCompletedGame(
           awayScore,
           homeRank,
           awayRank,
+          spread,
+          overUnder,
+          spreadResult,
+          ouResult,
         },
       });
       return true;
@@ -322,6 +393,10 @@ async function insertCompletedGame(
           awayScore,
           homeRank,
           awayRank,
+          spread,
+          overUnder,
+          spreadResult,
+          ouResult,
         },
       });
       return true;

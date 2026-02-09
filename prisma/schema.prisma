@@ -84,6 +84,7 @@ model Team {
   ncaambAwayGames NCAAMBGame[] @relation("NCAAMBAwayTeam")
   ncaambWins      NCAAMBGame[] @relation("NCAAMBWinner")
 
+  @@unique([sport, name])
   @@index([sport])
   @@index([sport, conference])
 }

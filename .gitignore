@@ -34,10 +34,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# data files (raw scraped data can be large)
-data/raw/
-data/*-staging.json
-data/*-staging.csv
-data/nfl-player-games.json
-data/player-matchup-index.json
+# data files (DB is source of truth — large JSON/CSV are seed artifacts)
+data/
 *.xlsx

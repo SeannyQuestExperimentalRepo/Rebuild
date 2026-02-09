@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import {
   executePlayerTrendQueryCached,
+  loadPlayerGamesCached,
   type PlayerTrendQuery,
   type PlayerTrendResult,
   type PlayerTrendGame,
@@ -17,6 +18,34 @@ import { enrichPlayerSummary } from "@/lib/significance-enrichment";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+
+/** Check if player data is available (file may not exist in serverless) */
+function isPlayerDataAvailable(): boolean {
+  try {
+    const games = loadPlayerGamesCached();
+    return games.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function playerDataUnavailableResponse() {
+  return NextResponse.json({
+    success: true,
+    data: {
+      query: {},
+      summary: null,
+      games: [],
+      gameCount: 0,
+      computedAt: new Date().toISOString(),
+      message:
+        "Player trends are not yet available in production. " +
+        "Player data (105K+ NFL game logs) is being migrated to the database. " +
+        "Game-level trends for NFL, NCAAF, and NCAAMB are fully available.",
+    },
+    meta: { durationMs: 0, gamesSearched: 0 },
+  });
+}
 
 // --- Zod Schemas ---
 
@@ -101,6 +130,8 @@ function errorResponse(message: string, status: number, details?: unknown) {
 // --- POST /api/trends/players ---
 
 export async function POST(request: NextRequest) {
+  if (!isPlayerDataAvailable()) return playerDataUnavailableResponse();
+
   const start = performance.now();
 
   let body: unknown;
@@ -132,6 +163,7 @@ export async function POST(request: NextRequest) {
 // --- GET /api/trends/players ---
 
 export async function GET(request: NextRequest) {
+  if (!isPlayerDataAvailable()) return playerDataUnavailableResponse();
   const start = performance.now();
   const { searchParams } = new URL(request.url);
 
