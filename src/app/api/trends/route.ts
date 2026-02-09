@@ -17,6 +17,7 @@ import {
   type TrendResult,
   type TrendGame,
 } from "@/lib/trend-engine";
+import { enrichGameSummary } from "@/lib/significance-enrichment";
 
 // --- Zod Schemas ---
 
@@ -81,11 +82,19 @@ function formatResponse(result: TrendResult, durationMs: number) {
     result.games.slice(0, MAX_RESPONSE_GAMES),
   );
 
+  // Enrich with statistical significance
+  const significance = enrichGameSummary(
+    result.summary,
+    result.query.perspective,
+    result.query.sport,
+  );
+
   return NextResponse.json({
     success: true,
     data: {
       query: result.query,
       summary: result.summary,
+      significance,
       games: trimmedGames,
       gameCount: result.games.length,
       computedAt: result.computedAt,
