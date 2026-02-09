@@ -104,7 +104,8 @@ function normalizeTeamName(name) {
 
 /**
  * Build a multi-key game index: date + various normalized team name forms.
- * For each game, index by homeTeam, homeTeamCanonical, and homeSlug.
+ * Indexes by BOTH home and away team names so neutral-site games match
+ * regardless of which team CFBD considers "home".
  */
 function buildGameIndex(games) {
   const index = {};
@@ -119,35 +120,60 @@ function buildGameIndex(games) {
     const date = g.gameDate;
     if (!date) continue;
 
-    // Index by homeTeam (short name)
+    // Index by homeTeam variants
     if (g.homeTeam) {
       addKey(`${date}|${normalizeTeamName(g.homeTeam)}`, i);
     }
-    // Index by homeTeamCanonical (full name)
     if (g.homeTeamCanonical) {
       addKey(`${date}|${normalizeTeamName(g.homeTeamCanonical)}`, i);
     }
-    // Index by homeSlug (sports-reference URL slug)
     if (g.homeSlug) {
       addKey(`${date}|${normalizeTeamName(g.homeSlug)}`, i);
+    }
+
+    // Index by awayTeam variants (for neutral-site/bowl game matching)
+    if (g.awayTeam) {
+      addKey(`${date}|${normalizeTeamName(g.awayTeam)}`, i);
+    }
+    if (g.awayTeamCanonical) {
+      addKey(`${date}|${normalizeTeamName(g.awayTeamCanonical)}`, i);
+    }
+    if (g.awaySlug) {
+      addKey(`${date}|${normalizeTeamName(g.awaySlug)}`, i);
     }
   }
   return index;
 }
 
 /**
+ * Shift a YYYY-MM-DD date string by N days.
+ */
+function shiftDate(dateStr, days) {
+  const d = new Date(dateStr + "T12:00:00Z"); // noon UTC to avoid DST issues
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().substring(0, 10);
+}
+
+/**
  * Try to find a game match for a CFBD record using multiple name forms.
+ * Also tries ±1 day to handle UTC/local timezone date mismatches
+ * (e.g., late-night West Coast kickoffs appear as next day in CFBD's UTC dates).
  */
 function findGameMatch(gameIndex, dateStr, cfbdTeamName) {
-  // Try direct CFBD name
-  let key = `${dateStr}|${normalizeTeamName(cfbdTeamName)}`;
-  if (gameIndex[key]) return gameIndex[key];
+  // Try exact date first, then ±1 day for timezone tolerance
+  const datesToTry = [dateStr, shiftDate(dateStr, -1), shiftDate(dateStr, +1)];
 
-  // Try canonical alias
-  const canonical = CFBD_TO_CANONICAL[cfbdTeamName];
-  if (canonical) {
-    key = `${dateStr}|${normalizeTeamName(canonical)}`;
+  for (const date of datesToTry) {
+    // Try direct CFBD name
+    let key = `${date}|${normalizeTeamName(cfbdTeamName)}`;
     if (gameIndex[key]) return gameIndex[key];
+
+    // Try canonical alias
+    const canonical = CFBD_TO_CANONICAL[cfbdTeamName];
+    if (canonical) {
+      key = `${date}|${normalizeTeamName(canonical)}`;
+      if (gameIndex[key]) return gameIndex[key];
+    }
   }
 
   return null;
@@ -165,6 +191,8 @@ async function importFromCFBD(apiKey) {
   const gameIndex = buildGameIndex(data);
   let matched = 0;
   let unmatched = 0;
+  let matchedViaAwayCount = 0;
+  let dateShiftCount = 0;
 
   for (const year of sortedSeasons) {
     try {
@@ -181,7 +209,7 @@ async function importFromCFBD(apiKey) {
           game.lines.find((l) => l.provider === "Bovada") ||
           game.lines[0];
 
-        const spread = line.spread ? parseFloat(line.spread) : null;
+        const cfbdSpread = line.spread ? parseFloat(line.spread) : null;
         const overUnder = line.overUnder ? parseFloat(line.overUnder) : null;
 
         // Match to staging game
@@ -190,10 +218,29 @@ async function importFromCFBD(apiKey) {
           : null;
         if (!dateStr) continue;
 
-        const candidates = findGameMatch(gameIndex, dateStr, game.homeTeam || "");
+        // Try matching via CFBD homeTeam first, then awayTeam
+        let candidates = findGameMatch(gameIndex, dateStr, game.homeTeam || "");
+        let matchedViaAway = false;
+
+        if (!candidates && game.awayTeam) {
+          candidates = findGameMatch(gameIndex, dateStr, game.awayTeam);
+          matchedViaAway = true;
+        }
 
         if (candidates && candidates.length > 0) {
           const idx = candidates[0]; // Take first match
+
+          // CFBD spread is from CFBD's homeTeam perspective.
+          // If we matched via awayTeam, the teams may be swapped vs our data.
+          // Check if our game's homeTeam matches CFBD's homeTeam to determine
+          // if we need to flip the spread sign.
+          let spread = cfbdSpread;
+          if (spread !== null && matchedViaAway) {
+            // We matched our game through CFBD's away team, meaning
+            // CFBD has the teams in opposite order. Negate the spread.
+            spread = -spread;
+          }
+
           data[idx].spread = spread;
           data[idx].overUnder = overUnder;
           data[idx].spreadResult = calculateSpreadResult(
@@ -207,6 +254,8 @@ async function importFromCFBD(apiKey) {
             overUnder
           );
           matched++;
+          if (matchedViaAway) matchedViaAwayCount++;
+          if (dateStr !== data[idx].gameDate) dateShiftCount++;
         } else {
           unmatched++;
         }
@@ -218,7 +267,7 @@ async function importFromCFBD(apiKey) {
     }
   }
 
-  return { matched, unmatched };
+  return { matched, unmatched, matchedViaAwayCount, dateShiftCount };
 }
 
 // ─── CSV/JSON File Mode ─────────────────────────────────────────────────────
@@ -301,8 +350,10 @@ async function main() {
       process.exit(1);
     }
 
-    const { matched, unmatched } = await importFromCFBD(apiKey);
-    console.log(`\nCFBD import: ${matched} matched, ${unmatched} unmatched`);
+    const result = await importFromCFBD(apiKey);
+    console.log(`\nCFBD import: ${result.matched} matched, ${result.unmatched} unmatched`);
+    console.log(`  Matched via away team: ${result.matchedViaAwayCount}`);
+    console.log(`  Matched via date shift: ${result.dateShiftCount}`);
   } else if (args.includes("--file")) {
     const fileIdx = args.indexOf("--file");
     const filePath = args[fileIdx + 1];
