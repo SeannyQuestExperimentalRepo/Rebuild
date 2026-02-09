@@ -8,7 +8,6 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import type { Sport } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 300; // 5 minutes
@@ -28,11 +27,12 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const where: { sport?: Sport; gameDate: { gte: Date } } = {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const where: Record<string, any> = {
       gameDate: { gte: new Date() },
     };
     if (sportParam) {
-      where.sport = sportParam as Sport;
+      where.sport = sportParam;
     }
 
     const games = await prisma.upcomingGame.findMany({
