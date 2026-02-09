@@ -35,6 +35,10 @@ function formatML(ml: number | null): string {
   return `${ml}`;
 }
 
+function teamSlug(name: string): string {
+  return encodeURIComponent(name);
+}
+
 export default function GameCard({
   homeTeam,
   awayTeam,
@@ -45,11 +49,11 @@ export default function GameCard({
   moneylineAway,
   sport,
 }: GameCardProps) {
-  const searchQuery = `${awayTeam} vs ${homeTeam} ${sport}`;
+  const gameUrl = `/game/${sport.toLowerCase()}/${teamSlug(homeTeam)}/${teamSlug(awayTeam)}`;
 
   return (
     <Link
-      href={`/search?q=${encodeURIComponent(searchQuery)}`}
+      href={gameUrl}
       className="block rounded-lg border border-border/60 bg-card p-3 transition-all hover:border-primary/40 hover:shadow-sm"
     >
       {/* Time */}

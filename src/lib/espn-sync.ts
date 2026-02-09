@@ -171,6 +171,8 @@ export async function syncCompletedGames(
         homeScore,
         awayScore,
         new Date(game.date),
+        game.homeTeam.rank,
+        game.awayTeam.rank,
       );
       if (success) inserted++;
       else skipped++;
@@ -259,6 +261,8 @@ async function insertCompletedGame(
   homeScore: number,
   awayScore: number,
   gameDate: Date,
+  homeRank: number | null = null,
+  awayRank: number | null = null,
 ): Promise<boolean> {
   const season = getSeason(gameDate, sport);
 
@@ -289,6 +293,8 @@ async function insertCompletedGame(
           awayTeamId,
           homeScore,
           awayScore,
+          homeRank,
+          awayRank,
         },
       });
       return true;
@@ -302,6 +308,8 @@ async function insertCompletedGame(
           awayTeamId,
           homeScore,
           awayScore,
+          homeRank,
+          awayRank,
         },
       });
       return true;

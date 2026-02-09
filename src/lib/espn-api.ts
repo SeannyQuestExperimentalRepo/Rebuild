@@ -41,6 +41,7 @@ export interface ESPNTeam {
   shortName: string; // "Kansas City" or "KC"
   abbreviation: string; // "KC"
   score: number | null;
+  rank: number | null; // AP ranking (null = unranked). ESPN uses 99 for unranked.
 }
 
 export interface ESPNOdds {
@@ -143,6 +144,7 @@ interface ESPNRawCompetitor {
     shortDisplayName: string;
     abbreviation: string;
   };
+  curatedRank?: { current?: number }; // AP ranking: 1-25 = ranked, 99 = unranked
   record?: string;
   records?: Array<{ type: string; summary: string }>;
 }
@@ -181,6 +183,13 @@ export async function fetchScoreboard(
   }
 }
 
+/** Extract AP ranking from ESPN curatedRank. Returns null for unranked (99) or missing. */
+function parseRank(comp: ESPNRawCompetitor): number | null {
+  const rank = comp.curatedRank?.current;
+  if (rank == null || rank >= 99) return null; // 99 = unranked in ESPN
+  return rank;
+}
+
 function parseEvent(event: ESPNRawEvent): ESPNGame | null {
   const comp = event.competitions?.[0];
   if (!comp) return null;
@@ -208,6 +217,7 @@ function parseEvent(event: ESPNRawEvent): ESPNGame | null {
       shortName: homeComp.team.shortDisplayName,
       abbreviation: homeComp.team.abbreviation,
       score: homeComp.score != null ? parseInt(homeComp.score, 10) : null,
+      rank: parseRank(homeComp),
     },
     awayTeam: {
       espnId: awayComp.team.id,
@@ -215,6 +225,7 @@ function parseEvent(event: ESPNRawEvent): ESPNGame | null {
       shortName: awayComp.team.shortDisplayName,
       abbreviation: awayComp.team.abbreviation,
       score: awayComp.score != null ? parseInt(awayComp.score, 10) : null,
+      rank: parseRank(awayComp),
     },
   };
 }
@@ -314,6 +325,7 @@ export async function fetchUpcomingWithOdds(
         shortName: homeComp.team.shortDisplayName,
         abbreviation: homeComp.team.abbreviation,
         score: homeComp.score != null ? parseInt(homeComp.score, 10) : null,
+        rank: parseRank(homeComp), // odds endpoint often empty, but try anyway
       };
 
       const awayTeam: ESPNTeam = {
@@ -322,6 +334,7 @@ export async function fetchUpcomingWithOdds(
         shortName: awayComp.team.shortDisplayName,
         abbreviation: awayComp.team.abbreviation,
         score: awayComp.score != null ? parseInt(awayComp.score, 10) : null,
+        rank: parseRank(awayComp),
       };
 
       results.push({
