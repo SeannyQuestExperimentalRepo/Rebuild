@@ -26,7 +26,7 @@ const QUICK_QUERIES = [
 
 export default function NFLPage() {
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8">
+    <div className="py-8">
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold">NFL Trends</h1>

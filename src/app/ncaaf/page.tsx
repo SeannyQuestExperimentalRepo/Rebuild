@@ -20,7 +20,7 @@ const QUICK_QUERIES = [
 
 export default function NCAAFPage() {
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8">
+    <div className="py-8">
       <div className="mb-8">
         <h1 className="text-2xl font-bold">NCAAF Trends</h1>
         <p className="mt-1 text-sm text-muted-foreground">

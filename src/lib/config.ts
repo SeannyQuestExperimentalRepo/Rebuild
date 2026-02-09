@@ -40,6 +40,9 @@ export const config = {
   stripePriceMonthly: getEnvVar("STRIPE_PRICE_MONTHLY"),
   stripePriceAnnual: getEnvVar("STRIPE_PRICE_ANNUAL"),
 
+  // Cron
+  cronSecret: getEnvVar("CRON_SECRET"),
+
   // App
   isProduction: process.env.NODE_ENV === "production",
   isDevelopment: process.env.NODE_ENV === "development",
@@ -51,4 +54,5 @@ export const features = {
   EXPORT_CSV: true,
   CUSTOM_ALERTS: false,
   LLM_SEARCH: true,
+  LIVE_ODDS: true,
 } as const;
