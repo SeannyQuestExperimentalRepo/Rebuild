@@ -51,10 +51,14 @@ function getSeasonDates(season) {
   return dates;
 }
 
+const MAX_RETRIES = 5;
+const RETRY_DELAYS = [5000, 15000, 30000, 60000, 120000]; // escalating backoff
+
 /**
  * Fetch and parse a daily boxscore page from Sports Reference CBB.
+ * Retries on network errors (ECONNRESET, timeouts, etc.) with exponential backoff.
  */
-async function fetchDailyGames(date) {
+async function fetchDailyGames(date, attempt = 0) {
   const month = date.getMonth() + 1;
   const day = date.getDate();
   const year = date.getFullYear();
@@ -62,15 +66,37 @@ async function fetchDailyGames(date) {
 
   const url = `https://www.sports-reference.com/cbb/boxscores/index.cgi?month=${month}&day=${day}&year=${year}`;
 
-  const res = await fetch(url, {
-    headers: { "User-Agent": USER_AGENT },
-  });
+  let res;
+  try {
+    res = await fetch(url, {
+      headers: { "User-Agent": USER_AGENT },
+      signal: AbortSignal.timeout(30000), // 30s timeout per request
+    });
+  } catch (err) {
+    // Network error (ECONNRESET, ETIMEDOUT, DNS failure, etc.)
+    if (attempt < MAX_RETRIES) {
+      const delay = RETRY_DELAYS[attempt] || 120000;
+      console.log(`    ⚠ Network error on ${dateStr} (attempt ${attempt + 1}/${MAX_RETRIES}): ${err.code || err.message}`);
+      console.log(`      Retrying in ${delay / 1000}s...`);
+      await sleep(delay);
+      return fetchDailyGames(date, attempt + 1);
+    }
+    console.log(`    ✗ FAILED ${dateStr} after ${MAX_RETRIES} retries: ${err.message}`);
+    return []; // skip this date, don't crash
+  }
 
   if (!res.ok) {
     if (res.status === 429) {
-      console.log(`    Rate limited on ${dateStr}, waiting 10s...`);
-      await sleep(10000);
-      return fetchDailyGames(date);
+      const delay = attempt < MAX_RETRIES ? RETRY_DELAYS[Math.min(attempt, RETRY_DELAYS.length - 1)] : 60000;
+      console.log(`    Rate limited on ${dateStr}, waiting ${delay / 1000}s (attempt ${attempt + 1})...`);
+      await sleep(delay);
+      return fetchDailyGames(date, attempt + 1);
+    }
+    if (res.status >= 500 && attempt < MAX_RETRIES) {
+      const delay = RETRY_DELAYS[attempt] || 60000;
+      console.log(`    ⚠ Server error ${res.status} on ${dateStr}, retrying in ${delay / 1000}s...`);
+      await sleep(delay);
+      return fetchDailyGames(date, attempt + 1);
     }
     return [];
   }
@@ -229,7 +255,17 @@ async function main() {
         continue;
       }
 
-      const games = await fetchDailyGames(dates[i]);
+      let games;
+      try {
+        games = await fetchDailyGames(dates[i]);
+      } catch (err) {
+        // Last-resort catch — save checkpoint and continue
+        console.log(`    ✗ Unexpected error on ${dateStr}: ${err.message}`);
+        console.log(`      Saving checkpoint and continuing...`);
+        fs.writeFileSync(outputPath, JSON.stringify(allGames, null, 2));
+        await sleep(30000);
+        continue;
+      }
 
       if (games.length > 0) {
         // Add season field

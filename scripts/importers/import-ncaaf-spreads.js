@@ -19,7 +19,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const dataPath = path.join(__dirname, "../../data/ncaaf-games-staging.json");
+const dataPath = path.join(__dirname, "../../data/ncaaf-games-final.json");
 const data = JSON.parse(fs.readFileSync(dataPath, "utf8"));
 
 const CFBD_BASE = "https://api.collegefootballdata.com";
@@ -67,10 +67,35 @@ function sleep(ms) {
 
 // ─── Match CFBD line to staging game ────────────────────────────────────────
 
+// Known name mismatches between CFBD and Sports Reference
+const TEAM_ALIASES = {
+  "hawai'i": "hawaii",
+  "miami": "miami (fl)",
+  "uconn": "connecticut",
+  "louisiana": "louisiana ragin' cajuns",
+  "uab": "uab blazers",
+  "ucf": "ucf knights",
+  "umass": "massachusetts",
+  "utep": "utep miners",
+  "utsa": "utsa roadrunners",
+  "smu": "smu mustangs",
+  "unlv": "unlv rebels",
+};
+
 function normalizeTeamName(name) {
-  return name
+  let n = name
     .toLowerCase()
-    .replace(/[^a-z0-9]/g, "")
+    .replace(/[^a-z0-9' ]/g, "")
+    .trim()
+    .replace(/\s+/g, "");
+
+  // Apply aliases
+  const alias = TEAM_ALIASES[n];
+  if (alias) {
+    n = alias.replace(/[^a-z0-9]/g, "");
+  }
+
+  return n
     .replace(/state$/, "st")
     .replace(/university$/, "");
 }
