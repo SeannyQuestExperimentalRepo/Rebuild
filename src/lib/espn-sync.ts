@@ -326,6 +326,11 @@ async function insertCompletedGame(
   const season = getSeason(gameDate, sport);
   const week = getWeek(gameDate, sport, season);
 
+  // Calculate derived fields
+  const scoreDifference = homeScore - awayScore;
+  const winnerId =
+    scoreDifference > 0 ? homeTeamId : scoreDifference < 0 ? awayTeamId : null;
+
   // Calculate spread and O/U results if odds available
   const spreadResult = calculateSpreadResult(homeScore, awayScore, spread);
   const ouResult = calculateOUResult(homeScore, awayScore, overUnder);
@@ -347,6 +352,8 @@ async function insertCompletedGame(
           awayTeamId,
           homeScore,
           awayScore,
+          scoreDifference,
+          winnerId,
           spread,
           overUnder,
           spreadResult,
@@ -369,6 +376,8 @@ async function insertCompletedGame(
           awayTeamId,
           homeScore,
           awayScore,
+          scoreDifference,
+          winnerId,
           homeRank,
           awayRank,
           spread,
@@ -391,6 +400,8 @@ async function insertCompletedGame(
           awayTeamId,
           homeScore,
           awayScore,
+          scoreDifference,
+          winnerId,
           homeRank,
           awayRank,
           spread,
@@ -405,4 +416,142 @@ async function insertCompletedGame(
     default:
       return false;
   }
+}
+
+// ─── Team Schedule Sync ─────────────────────────────────────────────────────
+
+/**
+ * ESPN team schedule endpoint — returns ALL games for a specific team + season.
+ * Unlike the scoreboard (which returns ~10-40 featured games/day), this returns
+ * a complete schedule including every D1 game.
+ *
+ * URL format:
+ *   https://site.api.espn.com/apis/site/v2/sports/{league}/teams/{espnId}/schedule?season={year}
+ */
+const TEAM_SCHEDULE_URLS: Record<Sport, string> = {
+  NFL: "https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams",
+  NCAAF: "https://site.api.espn.com/apis/site/v2/sports/football/college-football/teams",
+  NCAAMB: "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams",
+};
+
+interface ESPNTeamScheduleEvent {
+  date: string;
+  competitions: Array<{
+    status: { type: { state: string } };
+    competitors: Array<{
+      homeAway: "home" | "away";
+      score?: { value?: number; displayValue?: string };
+      team: { id: string; displayName: string; shortDisplayName: string; abbreviation: string };
+      curatedRank?: { current?: number };
+    }>;
+  }>;
+}
+
+interface ESPNTeamScheduleResponse {
+  events?: ESPNTeamScheduleEvent[];
+}
+
+/**
+ * Sync all completed games for a specific ESPN team ID + season.
+ * Uses the team schedule endpoint for complete coverage.
+ */
+export async function syncTeamSeason(
+  sport: Sport,
+  espnTeamId: string,
+  season: number,
+): Promise<SyncResult> {
+  const url = `${TEAM_SCHEDULE_URLS[sport]}/${espnTeamId}/schedule?season=${season}`;
+
+  let data: ESPNTeamScheduleResponse;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const res = await fetch(url, {
+        signal: controller.signal,
+        headers: { "User-Agent": "TrendLine/1.0" },
+      });
+      if (!res.ok) throw new Error(`ESPN API ${res.status}`);
+      data = await res.json();
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch (err) {
+    console.error(`[ESPN] Team schedule fetch failed for ${espnTeamId}:`, err);
+    return { sport, fetched: 0, inserted: 0, skipped: 0 };
+  }
+
+  const events = data.events ?? [];
+  const completed = events.filter(
+    (e) => e.competitions?.[0]?.status?.type?.state === "post",
+  );
+
+  if (completed.length === 0) {
+    return { sport, fetched: events.length, inserted: 0, skipped: 0 };
+  }
+
+  const teamIdMap = await getTeamIdMap();
+  const { mapTeamToCanonical: mapCanon } = await import("./espn-api");
+  let inserted = 0;
+  let skipped = 0;
+
+  for (const event of completed) {
+    const comp = event.competitions[0];
+    const homeComp = comp.competitors.find((c) => c.homeAway === "home");
+    const awayComp = comp.competitors.find((c) => c.homeAway === "away");
+    if (!homeComp || !awayComp) { skipped++; continue; }
+
+    const homeScore = homeComp.score?.value ?? null;
+    const awayScore = awayComp.score?.value ?? null;
+    if (homeScore == null || awayScore == null) { skipped++; continue; }
+
+    const homeESPN = {
+      espnId: homeComp.team.id,
+      displayName: homeComp.team.displayName,
+      shortName: homeComp.team.shortDisplayName,
+      abbreviation: homeComp.team.abbreviation,
+      score: homeScore,
+      rank: (homeComp.curatedRank?.current ?? 99) < 99
+        ? homeComp.curatedRank!.current!
+        : null,
+    };
+    const awayESPN = {
+      espnId: awayComp.team.id,
+      displayName: awayComp.team.displayName,
+      shortName: awayComp.team.shortDisplayName,
+      abbreviation: awayComp.team.abbreviation,
+      score: awayScore,
+      rank: (awayComp.curatedRank?.current ?? 99) < 99
+        ? awayComp.curatedRank!.current!
+        : null,
+    };
+
+    const homeCanonical = mapCanon(homeESPN, sport);
+    const awayCanonical = mapCanon(awayESPN, sport);
+    if (!homeCanonical || !awayCanonical) { skipped++; continue; }
+
+    const homeId = teamIdMap.get(`${sport}:${homeCanonical}`);
+    const awayId = teamIdMap.get(`${sport}:${awayCanonical}`);
+    if (!homeId || !awayId) { skipped++; continue; }
+
+    const gameDate = new Date(event.date);
+
+    try {
+      const success = await insertCompletedGame(
+        sport, homeId, awayId,
+        homeScore, awayScore, gameDate,
+        homeESPN.rank, awayESPN.rank,
+      );
+      if (success) inserted++;
+      else skipped++;
+    } catch {
+      skipped++;
+    }
+  }
+
+  console.log(
+    `[ESPN Sync] Team ${espnTeamId} season ${season}: completed=${completed.length}, inserted=${inserted}, skipped=${skipped}`,
+  );
+
+  return { sport, fetched: events.length, inserted, skipped };
 }

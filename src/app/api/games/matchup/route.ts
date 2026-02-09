@@ -95,6 +95,7 @@ export async function GET(request: NextRequest) {
         sport as "NFL" | "NCAAF" | "NCAAMB",
         homeTeam,
         awayTeam,
+        currentSeason,
       );
     } catch {
       // May fail if no historical matchup exists - that's OK
