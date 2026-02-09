@@ -15,10 +15,10 @@ function getEnvVar(name: string, required = false): string | undefined {
 
 export const config = {
   // Database
-  databaseUrl: getEnvVar("DATABASE_URL", true),
+  databaseUrl: getEnvVar("DATABASE_URL"),
 
   // NextAuth
-  nextAuthSecret: getEnvVar("NEXTAUTH_SECRET", true),
+  nextAuthSecret: getEnvVar("NEXTAUTH_SECRET"),
   nextAuthUrl: getEnvVar("NEXTAUTH_URL"),
 
   // Google OAuth
