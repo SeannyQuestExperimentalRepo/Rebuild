@@ -25,6 +25,65 @@ export const maxDuration = 30;
 
 const VALID_SPORTS = ["NFL", "NCAAF", "NCAAMB"];
 
+// ─── Team Name Canonicalization ────────────────────────────────────────────
+// The URL may carry an ESPN display name (e.g., "NC State") from the
+// UpcomingGame table, but the Game tables reference Team.name (e.g.,
+// "N.C. State"). This map resolves common mismatches so stats still load.
+const NAME_ALIASES: Record<string, string> = {
+  "NC State": "N.C. State",
+  "Chicago State": "Chicago St.",
+  "Jackson State": "Jackson St.",
+  "Indiana State": "Indiana St.",
+  "Arkansas-Pine Bluff": "Arkansas Pine Bluff",
+  "Texas A&M-Corpus Christi": "Texas A&M Corpus Chris",
+  "Appalachian State": "Appalachian St.",
+  "Bethune-Cookman": "Bethune Cookman",
+  "Louisiana-Monroe": "Louisiana Monroe",
+  "Ole Miss": "Mississippi",
+  "UConn": "Connecticut",
+  "Hawai'i": "Hawaii",
+  // Add more as discovered — these come from "Unresolved team" logs
+};
+
+/**
+ * Resolve a team name (which may be an ESPN display name or canonical) to
+ * the canonical Team.name stored in the DB. Returns the original name if
+ * no better match is found.
+ */
+async function resolveCanonicalName(
+  name: string,
+  sport: string,
+): Promise<string> {
+  // Fast path: exact match in Team table
+  const exact = await prisma.team.findFirst({
+    where: { sport: sport as "NFL" | "NCAAF" | "NCAAMB", name },
+    select: { name: true },
+  });
+  if (exact) return exact.name;
+
+  // Check static alias map
+  if (NAME_ALIASES[name]) {
+    return NAME_ALIASES[name];
+  }
+
+  // Try common transformations
+  const variants = [
+    name.replace(/ State$/, " St."),
+    name.replace(/-/g, " "),
+    name.replace(/ State$/, " St.").replace(/-/g, " "),
+  ];
+  for (const v of variants) {
+    const match = await prisma.team.findFirst({
+      where: { sport: sport as "NFL" | "NCAAF" | "NCAAMB", name: v },
+      select: { name: true },
+    });
+    if (match) return match.name;
+  }
+
+  // Fallback: return original (will just get empty stats)
+  return name;
+}
+
 interface TeamRecentGame {
   gameDate: string;
   opponent: string;
@@ -57,19 +116,38 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // 1. Get the upcoming game from DB (for live odds)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const upcomingWhere: Record<string, any> = {
-      sport,
-      homeTeam,
-      awayTeam,
-      gameDate: { gte: new Date() },
-    };
+    // 0. Resolve team names to canonical form
+    // URL may carry ESPN display names from UpcomingGame, but game data uses
+    // canonical Team.name. Resolve both before any queries.
+    const canonHome = await resolveCanonicalName(homeTeam, sport);
+    const canonAway = await resolveCanonicalName(awayTeam, sport);
 
-    const upcomingGame = await prisma.upcomingGame.findFirst({
-      where: upcomingWhere,
+    // 1. Get the upcoming game from DB (for live odds)
+    // Try both the original URL names AND canonical names (UpcomingGame may
+    // store either form depending on whether ESPN mapping succeeded).
+    const sportEnum = sport as "NFL" | "NCAAF" | "NCAAMB";
+    let upcomingGame = await prisma.upcomingGame.findFirst({
+      where: {
+        sport: sportEnum,
+        homeTeam,
+        awayTeam,
+        gameDate: { gte: new Date() },
+      },
       orderBy: { gameDate: "asc" },
     });
+
+    // If not found with original names, try canonical names
+    if (!upcomingGame && (canonHome !== homeTeam || canonAway !== awayTeam)) {
+      upcomingGame = await prisma.upcomingGame.findFirst({
+        where: {
+          sport: sportEnum,
+          homeTeam: canonHome,
+          awayTeam: canonAway,
+          gameDate: { gte: new Date() },
+        },
+        orderBy: { gameDate: "asc" },
+      });
+    }
 
     // 2. Load all games for trend analysis
     const allGames = await loadAllGamesCached();
@@ -89,12 +167,13 @@ export async function GET(request: NextRequest) {
     }
 
     // 4. Get historical context (uses existing engine)
+    // Use canonical names for all game-data queries
     let matchupContext: GameContext | null = null;
     try {
       matchupContext = await getMatchupContext(
         sport as "NFL" | "NCAAF" | "NCAAMB",
-        homeTeam,
-        awayTeam,
+        canonHome,
+        canonAway,
         currentSeason,
       );
     } catch {
@@ -102,18 +181,18 @@ export async function GET(request: NextRequest) {
     }
 
     // 5. Build recent games for each team (last 10)
-    const homeRecent = getRecentGames(sportGames, homeTeam, 10);
-    const awayRecent = getRecentGames(sportGames, awayTeam, 10);
+    const homeRecent = getRecentGames(sportGames, canonHome, 10);
+    const awayRecent = getRecentGames(sportGames, canonAway, 10);
 
     // 6. Build team season stats
-    const homeSeasonStats = buildSeasonStats(sportGames, homeTeam, currentSeason);
-    const awaySeasonStats = buildSeasonStats(sportGames, awayTeam, currentSeason);
+    const homeSeasonStats = buildSeasonStats(sportGames, canonHome, currentSeason);
+    const awaySeasonStats = buildSeasonStats(sportGames, canonAway, currentSeason);
 
     // 7. Build additional trend queries
     const additionalTrends = await buildAdditionalTrends(
       sport as "NFL" | "NCAAF" | "NCAAMB",
-      homeTeam,
-      awayTeam,
+      canonHome,
+      canonAway,
       currentSeason,
       allGames,
     );
@@ -150,8 +229,8 @@ export async function GET(request: NextRequest) {
       },
       meta: {
         sport,
-        homeTeam,
-        awayTeam,
+        homeTeam: canonHome,
+        awayTeam: canonAway,
         durationMs,
       },
     });
