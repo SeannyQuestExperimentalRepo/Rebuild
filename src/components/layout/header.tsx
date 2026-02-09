@@ -43,8 +43,21 @@ export function Header() {
         <div className="flex items-center gap-3">
           <Link
             href="/search"
-            className="hidden rounded-md bg-secondary px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground sm:block"
+            className="hidden items-center gap-2 rounded-md bg-secondary px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground sm:flex"
           >
+            <svg
+              className="h-3.5 w-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={2}
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"
+              />
+            </svg>
             Search trends...
           </Link>
           <button className="rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90">
