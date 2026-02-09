@@ -113,8 +113,9 @@ export function TrendResults({
   const { summary, significance, games, gameCount } = data;
   const query = data.query;
 
-  // Build recent streak dots from last 10 games (ATS)
-  const recentGames = games.slice(-10).reverse();
+  // Build recent streak dots from most recent 10 games (ATS)
+  // Games arrive sorted most-recent-first from the API
+  const recentGames = games.slice(0, 10);
   const atsStreak = recentGames
     .filter((g) => g.spreadResult && g.spreadResult !== "PUSH")
     .map((g) => g.spreadResult === "COVERED");
@@ -345,8 +346,7 @@ export function TrendResults({
               </thead>
               <tbody>
                 {games
-                  .slice(-20)
-                  .reverse()
+                  .slice(0, 20)
                   .map((g, i) => (
                     <tr
                       key={i}

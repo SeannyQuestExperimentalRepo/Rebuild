@@ -14,7 +14,7 @@
  */
 
 import {
-  loadAllGames,
+  loadAllGamesCached,
   executeTrendQuery,
   type TrendGame,
   type TrendQuery,
@@ -130,7 +130,7 @@ export function getDailyGameContext(
   sport?: "NFL" | "NCAAF" | "NCAAMB",
 ): DailyContextResult {
   const start = performance.now();
-  const allGames = loadAllGames();
+  const allGames = loadAllGamesCached();
 
   // Find games on this date
   let gamesOnDate = allGames.filter((g) => g.gameDate === date);
@@ -169,7 +169,7 @@ export function getMatchupContext(
   awayTeam: string,
   season?: number,
 ): GameContext | null {
-  const allGames = loadAllGames();
+  const allGames = loadAllGamesCached();
 
   // Find the most recent game for this matchup
   const matchingGames = allGames

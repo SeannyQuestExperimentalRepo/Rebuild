@@ -160,7 +160,7 @@ export default function Home() {
           <span className="font-medium text-foreground">
             {stats
               ? `${stats.total.toLocaleString()} games`
-              : "50,000+ games"}
+              : "149,000+ games"}
           </span>{" "}
           of historical data.
         </p>

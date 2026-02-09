@@ -31,7 +31,7 @@ export default function NFLPage() {
       <div className="mb-8">
         <h1 className="text-2xl font-bold">NFL Trends</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          14,000+ games from 1966-2025. Search by team, situation, or explore
+          Every game since 1966. Search by team, situation, or explore
           auto-discovered angles.
         </p>
       </div>

@@ -189,7 +189,7 @@ async function main() {
     }
   }
 
-  const ncaafTeamRecords = [...ncaafTeamSet.entries()].map(([name, meta]) => ({
+  const ncaafTeamRecords = Array.from(ncaafTeamSet.entries()).map(([name, meta]) => ({
     name,
     abbreviation: name.substring(0, 6).toUpperCase(),
     sport: Sport.NCAAF,
@@ -213,7 +213,7 @@ async function main() {
     }
   }
 
-  const ncaambTeamRecords = [...ncaambTeamSet.entries()].map(([name, meta]) => ({
+  const ncaambTeamRecords = Array.from(ncaambTeamSet.entries()).map(([name, meta]) => ({
     name,
     abbreviation: name.substring(0, 6).toUpperCase(),
     sport: Sport.NCAAMB,

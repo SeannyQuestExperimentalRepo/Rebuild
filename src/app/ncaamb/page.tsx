@@ -24,7 +24,7 @@ export default function NCAAMBPage() {
       <div className="mb-8">
         <h1 className="text-2xl font-bold">NCAAMB Trends</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          24,000+ Division I games with KenPom ratings, tournament data, and spread proxies.
+          120,000+ Division I games with KenPom ratings, tournament data, and spread proxies.
         </p>
       </div>
 

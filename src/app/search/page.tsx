@@ -97,15 +97,20 @@ function SearchPageInner() {
         if (parseRes.ok) {
           const parsed = await parseRes.json();
           if (parsed.success && parsed.data) {
-            const { trendQuery, interpretation, queryType } = parsed.data;
+            const { trendQuery, playerTrendQuery, interpretation, queryType } =
+              parsed.data;
 
-            // Step 2: Execute the parsed query
+            // Step 2: Execute the parsed query (use playerTrendQuery for player searches)
             const endpoint =
               queryType === "player" ? "/api/trends/players" : "/api/trends";
+            const queryPayload =
+              queryType === "player" && playerTrendQuery
+                ? playerTrendQuery
+                : trendQuery;
             const execRes = await fetch(endpoint, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(trendQuery),
+              body: JSON.stringify(queryPayload),
             });
 
             const execData = await execRes.json();

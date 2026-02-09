@@ -1,12 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { SignificanceBadge } from "@/components/trends/significance-badge";
 
 interface DiscoveredAngle {
-  name: string;
-  description: string;
+  id: string;
+  label: string;
+  headline: string;
   category: string;
+  sport: string;
   record: {
     wins: number;
     losses: number;
@@ -41,7 +44,26 @@ type SportFilter = "NFL" | "NCAAF" | "NCAAMB";
 type StrengthFilter = "all" | "strong" | "moderate" | "weak";
 
 export default function TrendsPage() {
-  const [sport, setSport] = useState<SportFilter>("NFL");
+  return (
+    <Suspense
+      fallback={
+        <div className="mx-auto max-w-5xl px-4 py-8">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        </div>
+      }
+    >
+      <TrendsPageInner />
+    </Suspense>
+  );
+}
+
+function TrendsPageInner() {
+  const searchParams = useSearchParams();
+  const sportParam = searchParams.get("sport");
+  const initialSport: SportFilter =
+    sportParam === "NCAAF" || sportParam === "NCAAMB" ? sportParam : "NFL";
+
+  const [sport, setSport] = useState<SportFilter>(initialSport);
   const [minStrength, setMinStrength] = useState<StrengthFilter>("all");
   const [team, setTeam] = useState("");
   const [angles, setAngles] = useState<DiscoveredAngle[]>([]);
@@ -229,9 +251,9 @@ function AngleCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h3 className="font-semibold leading-tight">{angle.name}</h3>
+              <h3 className="font-semibold leading-tight">{angle.headline}</h3>
               <p className="mt-0.5 text-sm text-muted-foreground">
-                {angle.description}
+                {angle.label}
               </p>
             </div>
             <SignificanceBadge
@@ -342,7 +364,7 @@ function AngleCard({
               </span>
               <p className="mt-2 tabular-nums text-muted-foreground">
                 Interest score:{" "}
-                {(angle.interestScore * 100).toFixed(0)}
+                {Math.round(angle.interestScore)}
               </p>
             </div>
           </div>
