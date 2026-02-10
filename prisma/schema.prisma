@@ -137,6 +137,7 @@ model NFLGame {
   @@index([dayOfWeek, spread])
   @@index([isPlayoff, spread])
   @@index([season, homeTeamId, spread])
+  @@index([awayTeamId, season])
 }
 
 // ─── NCAAF GAMES ────────────────────────────────────────────────────────────
@@ -190,6 +191,8 @@ model NCAAFGame {
   @@index([awayRank])
   @@index([weatherCategory, spread])
   @@index([season, homeTeamId, spread])
+  @@index([homeTeamId, season])
+  @@index([awayTeamId, season])
 }
 
 // ─── NCAAMB GAMES ───────────────────────────────────────────────────────────
@@ -256,6 +259,8 @@ model NCAAMBGame {
   @@index([isTournament, tournamentRound])
   @@index([isConferenceGame])
   @@index([season, homeTeamId, spread])
+  @@index([homeTeamId, season])
+  @@index([awayTeamId, season])
 }
 
 // ─── UPCOMING GAMES (Live odds + weather forecasts) ─────────────────────────
