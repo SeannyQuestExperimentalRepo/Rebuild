@@ -2,8 +2,16 @@
 
 import { useState, useRef, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { TrendResults } from "@/components/trends/trend-results";
+import dynamic from "next/dynamic";
 import { useTrendQuery } from "@/hooks/use-trend-query";
+
+const TrendResults = dynamic(
+  () =>
+    import("@/components/trends/trend-results").then(
+      (mod) => mod.TrendResults,
+    ),
+  { ssr: false },
+);
 
 const EXAMPLE_QUERIES = [
   "Home underdogs in primetime NFL",
