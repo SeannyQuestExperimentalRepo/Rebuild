@@ -2,12 +2,26 @@
 
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useMatchup } from "@/hooks/use-matchup";
 import { MatchupHeader } from "@/components/matchup/matchup-header";
-import { TeamComparison } from "@/components/matchup/team-comparison";
-import { HeadToHead } from "@/components/matchup/head-to-head";
-import { TrendAngles } from "@/components/matchup/trend-angles";
-import { RecentGamesTable } from "@/components/matchup/recent-games-table";
+
+const TeamComparison = dynamic(
+  () => import("@/components/matchup/team-comparison").then((m) => m.TeamComparison),
+  { ssr: false }
+);
+const HeadToHead = dynamic(
+  () => import("@/components/matchup/head-to-head").then((m) => m.HeadToHead),
+  { ssr: false }
+);
+const TrendAngles = dynamic(
+  () => import("@/components/matchup/trend-angles").then((m) => m.TrendAngles),
+  { ssr: false }
+);
+const RecentGamesTable = dynamic(
+  () => import("@/components/matchup/recent-games-table").then((m) => m.RecentGamesTable),
+  { ssr: false }
+);
 
 interface MatchupData {
   upcoming: {
