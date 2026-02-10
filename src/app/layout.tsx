@@ -1,10 +1,15 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import dynamic from "next/dynamic";
 import { Header } from "@/components/layout/header";
 import { Footer } from "@/components/layout/footer";
-import UpcomingGamesSidebar from "@/components/sidebar/upcoming-games-sidebar";
 import { Providers } from "./providers";
+
+const UpcomingGamesSidebar = dynamic(
+  () => import("@/components/sidebar/upcoming-games-sidebar"),
+  { ssr: false }
+);
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
