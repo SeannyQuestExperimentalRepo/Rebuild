@@ -93,7 +93,7 @@ function formatResponse(result: TrendResult, durationMs: number) {
     result.query.sport,
   );
 
-  return NextResponse.json({
+  const response = NextResponse.json({
     success: true,
     data: {
       query: result.query,
@@ -109,6 +109,11 @@ function formatResponse(result: TrendResult, durationMs: number) {
       gamesSearched: result.summary.totalGames,
     },
   });
+  response.headers.set(
+    "Cache-Control",
+    "s-maxage=300, stale-while-revalidate=3600",
+  );
+  return response;
 }
 
 function errorResponse(message: string, status: number, details?: unknown) {

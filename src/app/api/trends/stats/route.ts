@@ -69,7 +69,7 @@ export async function GET() {
 
     const durationMs = Math.round(performance.now() - start);
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       data: {
         nfl: {
@@ -91,6 +91,11 @@ export async function GET() {
       },
       meta: { durationMs },
     });
+    response.headers.set(
+      "Cache-Control",
+      "s-maxage=3600, stale-while-revalidate=86400",
+    );
+    return response;
   } catch (err) {
     console.error("[GET /api/trends/stats] Error:", err);
     return NextResponse.json(

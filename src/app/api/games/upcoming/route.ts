@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
       take: 30,
     });
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       data: {
         games: games.map((g) => ({
@@ -58,6 +58,11 @@ export async function GET(request: NextRequest) {
         lastUpdated: games[0]?.lastUpdated?.toISOString() ?? null,
       },
     });
+    response.headers.set(
+      "Cache-Control",
+      "s-maxage=300, stale-while-revalidate=600",
+    );
+    return response;
   } catch (err) {
     console.error("[GET /api/games/upcoming] Error:", err);
     return NextResponse.json(

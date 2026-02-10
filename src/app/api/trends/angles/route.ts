@@ -46,6 +46,14 @@ function errorResponse(message: string, status: number, details?: unknown) {
   );
 }
 
+function withCache(response: NextResponse): NextResponse {
+  response.headers.set(
+    "Cache-Control",
+    "s-maxage=600, stale-while-revalidate=3600",
+  );
+  return response;
+}
+
 // --- POST /api/trends/angles ---
 
 export async function POST(request: NextRequest) {
@@ -68,7 +76,7 @@ export async function POST(request: NextRequest) {
     const result = await executeReverseLookup(options);
     const durationMs = Math.round(performance.now() - start);
 
-    return NextResponse.json({
+    return withCache(NextResponse.json({
       success: true,
       data: {
         angles: result.angles.map((a) => ({
@@ -89,7 +97,7 @@ export async function POST(request: NextRequest) {
         computedAt: result.computedAt,
       },
       meta: { durationMs },
-    });
+    }));
   } catch (err) {
     console.error("[POST /api/trends/angles] Error:", err);
     return errorResponse(
@@ -146,7 +154,7 @@ export async function GET(request: NextRequest) {
         maxResults || 15,
       );
       const durationMs = Math.round(performance.now() - start);
-      return NextResponse.json({
+      return withCache(NextResponse.json({
         success: true,
         data: {
           angles: result.angles.map((a) => ({
@@ -167,7 +175,7 @@ export async function GET(request: NextRequest) {
           computedAt: result.computedAt,
         },
         meta: { durationMs },
-      });
+      }));
     }
 
     const options: ReverseLookupOptions = {
@@ -182,7 +190,7 @@ export async function GET(request: NextRequest) {
     const result = await executeReverseLookup(options);
     const durationMs = Math.round(performance.now() - start);
 
-    return NextResponse.json({
+    return withCache(NextResponse.json({
       success: true,
       data: {
         angles: result.angles.map((a) => ({
@@ -203,7 +211,7 @@ export async function GET(request: NextRequest) {
         computedAt: result.computedAt,
       },
       meta: { durationMs },
-    });
+    }));
   } catch (err) {
     console.error("[GET /api/trends/angles] Error:", err);
     return errorResponse(
