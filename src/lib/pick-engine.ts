@@ -1,8 +1,8 @@
 /**
- * Daily Pick Engine v3
+ * Daily Pick Engine v4
  *
  * Signal Convergence Scoring Model — generates daily betting picks by
- * evaluating 6 independent signal categories and measuring convergence:
+ * evaluating 7 independent signal categories:
  *
  *   1. Model Edge — KenPom predictions (NCAAMB) or power ratings (NFL/NCAAF)
  *   2. Season ATS — Wilson-adjusted ATS performance
@@ -10,10 +10,17 @@
  *   4. Recent Form — last 5 game ATS momentum
  *   5. Head-to-Head — historical H2H ATS with Wilson intervals
  *   6. Situational — weather, rest advantages
+ *   7. Rest/B2B — schedule fatigue (NCAAMB)
  *
- * Key innovation: convergence bonus when signals agree, contradiction
- * penalty when strong signals disagree. Produces real variance:
- *   - 3★ (55-69): mixed signals, modest edges
+ * v4 changes (backtest-validated on 5,523 NCAAMB games):
+ *   - Removed 3★ picks (were -5.5% ROI)
+ *   - Fixed O/U sumDE thresholds (200-215 is UNDER, not OVER)
+ *   - Added O/U line-range signal (155+ → UNDER at 68-70%)
+ *   - Faded home-side KenPom edge after Nov (47-48% → contrarian)
+ *   - Disabled spread convergence bonus (signal agreement hurts spreads)
+ *   - Added B2B rest signal (home on B2B → 42% cover)
+ *
+ * Confidence tiers:
  *   - 4★ (70-84): clear model edge + confirming angles
  *   - 5★ (85+): rare full convergence across 4+ categories
  *
@@ -73,7 +80,8 @@ const SPREAD_WEIGHTS: Record<string, Record<string, number>> = {
     trendAngles: 0.25,
     recentForm: 0.15,
     h2h: 0.10,
-    situational: 0.05,
+    situational: 0.00,
+    restDays: 0.05,
   },
   NFL: {
     modelEdge: 0.20,
@@ -387,24 +395,27 @@ function computeKenPomEdge(
     let absMag = clamp(Math.abs(spreadEdge) / 0.7, 0, 10);
     let conf = 0.8;
 
-    // Season-half adjustment: home-side kenpom_edge (spreadEdge > 0)
-    // only profitable Nov-Dec (60.2%). Jan-Apr drops to 52% (not significant).
-    // Away-side (spreadEdge < 0) is stable year-round (57-58%).
+    // v4 Season-half adjustment (backtest validated):
+    // Home-side KenPom edge (positive) is a LOSING signal after November.
+    // Backtest: home edge >+6 → 48.3% (losing), away edge <-6 → 53.6% (profitable).
+    // After Nov: flip home-side edges to contrarian away fade.
     const isEarlySeason = gameMonth >= 11; // Nov, Dec
-    if (spreadEdge > 0.5 && !isEarlySeason) {
-      absMag *= 0.4;
-      conf = 0.45;
-    }
-
-    // March top-25 home regression: 43.8% cover (fade home favorites)
     let marchNote = "";
-    if (gameMonth === 3 && spreadEdge > 0.5 && homeRating.RankAdjEM <= 25) {
-      absMag *= 0.3;
-      conf = 0.40;
-      marchNote = " [March top-25 home fade: 43.8% hist.]";
-    }
+    let seasonNote = "";
 
-    const seasonNote = spreadEdge > 0.5 && !isEarlySeason && !marchNote ? " [home edge weak Jan+]" : "";
+    if (spreadEdge > 0.5 && !isEarlySeason) {
+      // March top-25 home: strongest fade (43.8% hist.)
+      if (gameMonth === 3 && homeRating.RankAdjEM <= 25) {
+        absMag *= 0.25;
+        conf = 0.35;
+        marchNote = " [March top-25 home fade: 44% hist.]";
+      } else {
+        // Jan-Apr: home-side edge runs 47-48% — fade it
+        absMag *= 0.20;
+        conf = 0.30;
+        seasonNote = " [home edge faded Jan+: 47% hist.]";
+      }
+    }
     spreadSignal = {
       category: "modelEdge",
       direction: spreadEdge > 0.5 ? "home" : spreadEdge < -0.5 ? "away" : "neutral",
@@ -428,38 +439,44 @@ function computeKenPomEdge(
     let ouConf = 0;
     const labelParts: string[] = [];
 
-    // Primary signal: sum_AdjDE thresholds
-    if (sumAdjDE > 210) {
-      ouDir = "over"; ouMag = 8; ouConf = 0.92;
-      labelParts.push(`sum_AdjDE=${sumAdjDE.toFixed(1)} (strong OVER, 67% hist.)`);
+    // Primary signal: sum_AdjDE thresholds (v4 — recalibrated from 5,523 game backtest)
+    // Key fix: 200-215 range was incorrectly classified as OVER in v3.
+    // Backtest showed: >215 = 60.8% OVER, 210-215 = 46.9% OVER, 200-210 = 30-35% OVER.
+    if (sumAdjDE > 215) {
+      ouDir = "over"; ouMag = 8; ouConf = 0.85;
+      labelParts.push(`sum_AdjDE=${sumAdjDE.toFixed(1)} (strong OVER, 61% hist.)`);
+    } else if (sumAdjDE > 210) {
+      // 210-215: 46.9% over — essentially a coin flip, neutral
+      labelParts.push(`sum_AdjDE=${sumAdjDE.toFixed(1)} (neutral 210-215)`);
     } else if (sumAdjDE > 205) {
-      ouDir = "over"; ouMag = 6; ouConf = 0.85;
-      labelParts.push(`sum_AdjDE=${sumAdjDE.toFixed(1)} (OVER zone, 63% hist.)`);
-    } else if (sumAdjDE > 200) {
-      ouDir = "over"; ouMag = 4; ouConf = 0.75;
-      labelParts.push(`sum_AdjDE=${sumAdjDE.toFixed(1)} (mod. OVER, 59% hist.)`);
-    } else if (sumAdjDE < 185) {
-      ouDir = "under"; ouMag = 10; ouConf = 0.95;
-      labelParts.push(`sum_AdjDE=${sumAdjDE.toFixed(1)} (elite UNDER, 86% hist.)`);
-    } else if (sumAdjDE < 190) {
-      ouDir = "under"; ouMag = 8; ouConf = 0.92;
-      labelParts.push(`sum_AdjDE=${sumAdjDE.toFixed(1)} (strong UNDER, 81% hist.)`);
-    } else if (sumAdjDE < 195) {
       ouDir = "under"; ouMag = 5; ouConf = 0.80;
-      labelParts.push(`sum_AdjDE=${sumAdjDE.toFixed(1)} (UNDER zone, ~65% hist.)`);
+      labelParts.push(`sum_AdjDE=${sumAdjDE.toFixed(1)} (UNDER zone, 65% hist.)`);
+    } else if (sumAdjDE > 200) {
+      ouDir = "under"; ouMag = 6; ouConf = 0.85;
+      labelParts.push(`sum_AdjDE=${sumAdjDE.toFixed(1)} (strong UNDER, 70% hist.)`);
+    } else if (sumAdjDE > 195) {
+      ouDir = "under"; ouMag = 8; ouConf = 0.90;
+      labelParts.push(`sum_AdjDE=${sumAdjDE.toFixed(1)} (strong UNDER, 75% hist.)`);
+    } else if (sumAdjDE > 190) {
+      ouDir = "under"; ouMag = 8; ouConf = 0.92;
+      labelParts.push(`sum_AdjDE=${sumAdjDE.toFixed(1)} (strong UNDER, 74% hist.)`);
+    } else if (sumAdjDE > 185) {
+      ouDir = "under"; ouMag = 9; ouConf = 0.93;
+      labelParts.push(`sum_AdjDE=${sumAdjDE.toFixed(1)} (elite UNDER, 80% hist.)`);
     } else {
-      labelParts.push(`sum_AdjDE=${sumAdjDE.toFixed(1)} (neutral 195-200)`);
+      ouDir = "under"; ouMag = 10; ouConf = 0.95;
+      labelParts.push(`sum_AdjDE=${sumAdjDE.toFixed(1)} (elite UNDER, 92% hist.)`);
     }
 
     // Tempo x DE interaction amplifier
-    if (ouDir === "over" && avgTempo > 70 && sumAdjDE > 205) {
+    if (ouDir === "over" && avgTempo > 70 && sumAdjDE > 215) {
       ouMag = Math.min(ouMag + 2, 10);
       ouConf = Math.min(ouConf + 0.05, 1.0);
-      labelParts.push(`fast tempo ${avgTempo.toFixed(1)} amplifies OVER (82% combined)`);
-    } else if (ouDir === "over" && avgTempo > 68 && sumAdjDE > 200) {
+      labelParts.push(`fast tempo ${avgTempo.toFixed(1)} amplifies OVER`);
+    } else if (ouDir === "over" && avgTempo > 68 && sumAdjDE > 215) {
       ouMag = Math.min(ouMag + 1, 10);
       labelParts.push(`tempo ${avgTempo.toFixed(1)} supports OVER`);
-    } else if (ouDir === "under" && avgTempo < 64 && sumAdjDE < 195) {
+    } else if (ouDir === "under" && avgTempo < 64 && sumAdjDE < 205) {
       ouMag = Math.min(ouMag + 2, 10);
       ouConf = Math.min(ouConf + 0.05, 1.0);
       labelParts.push(`slow tempo ${avgTempo.toFixed(1)} amplifies UNDER`);
@@ -517,15 +534,26 @@ function computeKenPomEdge(
       }
     }
 
-    // High line bias (overUnder > 155 -> 60.4% UNDER)
-    if (overUnder > 155) {
+    // Line-range bias (v4 — backtest validated)
+    // Lines 155+: 68-70% UNDER. Lines <135: 57% OVER.
+    if (overUnder >= 155) {
       if (ouDir === "under") {
-        ouMag = Math.min(ouMag + 1, 10);
-        labelParts.push(`high line ${overUnder}`);
+        ouMag = Math.min(ouMag + 3, 10);
+        ouConf = Math.min(ouConf + 0.05, 1.0);
+        labelParts.push(`high line ${overUnder} (68-70% UNDER hist.)`);
+      } else if (ouDir === "neutral" || ouDir === "over") {
+        ouDir = "under"; ouMag = Math.max(ouMag, 6);
+        ouConf = Math.max(ouConf, 0.82);
+        labelParts.push(`HIGH LINE OVERRIDE ${overUnder} (68-70% UNDER hist.)`);
+      }
+    } else if (overUnder < 135) {
+      if (ouDir === "over") {
+        ouMag = Math.min(ouMag + 2, 10);
+        labelParts.push(`low line ${overUnder} (57% OVER hist.)`);
       } else if (ouDir === "neutral") {
-        ouDir = "under"; ouMag = 3;
-        ouConf = Math.max(ouConf, 0.65);
-        labelParts.push(`high line ${overUnder} (60% UNDER hist.)`);
+        ouDir = "over"; ouMag = Math.max(ouMag, 4);
+        ouConf = Math.max(ouConf, 0.70);
+        labelParts.push(`low line lean OVER ${overUnder} (57% hist.)`);
       }
     }
 
@@ -985,6 +1013,76 @@ function signalSituational(
   };
 }
 
+// ─── Signal: Rest Days / Back-to-Back ────────────────────────────────────────
+// v4: Home team on B2B (≤1 day rest) covers at only ~42%. Fade home in that spot.
+
+function signalRestDays(
+  allGames: TrendGame[],
+  canonHome: string,
+  canonAway: string,
+  gameDate: string,
+  sport: Sport,
+): SignalResult {
+  // Only meaningful for NCAAMB (frequent B2B in conference play)
+  if (sport !== "NCAAMB") {
+    return { category: "restDays", direction: "neutral", magnitude: 0, confidence: 0, label: "N/A", strength: "noise" };
+  }
+
+  const gameDateObj = new Date(gameDate + "T12:00:00Z");
+  const oneDayAgo = new Date(gameDateObj.getTime() - 36 * 60 * 60 * 1000); // 36h window
+
+  // Find most recent game for each team before this game date
+  let homeLastGame: string | null = null;
+  let awayLastGame: string | null = null;
+
+  for (const g of allGames) {
+    if (g.gameDate >= gameDate) continue; // only prior games
+    if (g.homeTeam === canonHome || g.awayTeam === canonHome) {
+      if (!homeLastGame || g.gameDate > homeLastGame) homeLastGame = g.gameDate;
+    }
+    if (g.homeTeam === canonAway || g.awayTeam === canonAway) {
+      if (!awayLastGame || g.gameDate > awayLastGame) awayLastGame = g.gameDate;
+    }
+  }
+
+  const homeOnB2B = homeLastGame ? new Date(homeLastGame + "T12:00:00Z") >= oneDayAgo : false;
+  const awayOnB2B = awayLastGame ? new Date(awayLastGame + "T12:00:00Z") >= oneDayAgo : false;
+
+  if (homeOnB2B && !awayOnB2B) {
+    // Home team on B2B, away rested → pro-away
+    return {
+      category: "restDays",
+      direction: "away",
+      magnitude: 5,
+      confidence: 0.65,
+      label: `${canonHome} on B2B, ${canonAway} rested`,
+      strength: "moderate",
+    };
+  } else if (awayOnB2B && !homeOnB2B) {
+    // Away on B2B, home rested → slight pro-home (but weaker — home advantage already priced)
+    return {
+      category: "restDays",
+      direction: "home",
+      magnitude: 3,
+      confidence: 0.55,
+      label: `${canonAway} on B2B, ${canonHome} rested`,
+      strength: "weak",
+    };
+  } else if (homeOnB2B && awayOnB2B) {
+    // Both on B2B — wash
+    return {
+      category: "restDays",
+      direction: "neutral",
+      magnitude: 0,
+      confidence: 0,
+      label: "Both teams on B2B",
+      strength: "noise",
+    };
+  }
+
+  return { category: "restDays", direction: "neutral", magnitude: 0, confidence: 0, label: "Normal rest", strength: "noise" };
+}
+
 // ─── Signal Functions: O/U ───────────────────────────────────────────────────
 
 function signalSeasonOU(homeStats: TeamStats, awayStats: TeamStats): SignalResult {
@@ -1209,6 +1307,7 @@ function signalH2HWeatherOU(
 function computeConvergenceScore(
   signals: SignalResult[],
   weights: Record<string, number>,
+  skipConvergenceBonus = false,
 ): {
   score: number;
   direction: "home" | "away" | "over" | "under";
@@ -1257,12 +1356,16 @@ function computeConvergenceScore(
   let score = 50 + rawStrength * 80;
 
   // ── Convergence bonus: when many signals agree ──
+  // v4: Skip for spread picks — backtest showed signal agreement HURTS spread accuracy
+  // (KenPom + ATS agreeing → 39.7% win rate due to ATS mean-reversion)
   const nonNeutralCount = activeSignals.length;
   const agreeingCount = activeSignals.filter((s) => s.direction === bestDir).length;
   const agreeRatio = nonNeutralCount > 0 ? agreeingCount / nonNeutralCount : 0;
 
-  if (agreeRatio >= 0.8 && nonNeutralCount >= 3) score += 8;
-  else if (agreeRatio >= 0.6 && nonNeutralCount >= 3) score += 4;
+  if (!skipConvergenceBonus) {
+    if (agreeRatio >= 0.8 && nonNeutralCount >= 3) score += 8;
+    else if (agreeRatio >= 0.6 && nonNeutralCount >= 3) score += 4;
+  }
 
   // ── Contradiction penalty: strong opposing signals ──
   const strongDisagreeing = activeSignals.filter(
@@ -1272,11 +1375,13 @@ function computeConvergenceScore(
   else if (strongDisagreeing === 1) score -= 5;
 
   // ── Statistical evidence bonus: multiple strong/moderate signals agreeing ──
-  const strongModerateAgreeing = activeSignals.filter(
-    (s) => s.direction === bestDir && (s.strength === "strong" || s.strength === "moderate"),
-  ).length;
-  if (strongModerateAgreeing >= 3) score += 6;
-  else if (strongModerateAgreeing >= 2) score += 3;
+  if (!skipConvergenceBonus) {
+    const strongModerateAgreeing = activeSignals.filter(
+      (s) => s.direction === bestDir && (s.strength === "strong" || s.strength === "moderate"),
+    ).length;
+    if (strongModerateAgreeing >= 3) score += 6;
+    else if (strongModerateAgreeing >= 2) score += 3;
+  }
 
   score = clamp(Math.round(score), 0, 100);
 
@@ -1658,10 +1763,11 @@ export async function generateDailyPicks(
                 game.forecastWindMph, game.forecastTemp,
                 game.forecastCategory, sport,
               ),
+              signalRestDays(allGames, canonHome, canonAway, dateStr, sport),
             ];
 
-            const result = computeConvergenceScore(spreadSignals, sportWeightsSpread);
-            const confidence = result.score >= 85 ? 5 : result.score >= 70 ? 4 : result.score >= 55 ? 3 : 0;
+            const result = computeConvergenceScore(spreadSignals, sportWeightsSpread, true);
+            const confidence = result.score >= 85 ? 5 : result.score >= 70 ? 4 : 0;
 
             if (confidence > 0) {
               const teamName = result.direction === "home" ? canonHome : canonAway;
@@ -1702,7 +1808,7 @@ export async function generateDailyPicks(
             ];
 
             const result = computeConvergenceScore(ouSignals, sportWeightsOU);
-            const confidence = result.score >= 85 ? 5 : result.score >= 70 ? 4 : result.score >= 55 ? 3 : 0;
+            const confidence = result.score >= 85 ? 5 : result.score >= 70 ? 4 : 0;
 
             if (confidence > 0) {
               const label = result.direction === "over" ? "Over" : "Under";
