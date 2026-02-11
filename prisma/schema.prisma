@@ -302,6 +302,7 @@ model User {
   accounts           Account[]
   sessions           Session[]
   searches           SearchLog[]
+  bets               Bet[]
 }
 
 model Account {
@@ -389,6 +390,61 @@ model PlayerGameLog {
   @@index([team, season])
   @@index([season, positionGroup])
   @@index([playerId])
+}
+
+// ─── BET TRACKING ──────────────────────────────────────────────────────────
+
+enum BetType {
+  SPREAD
+  OVER_UNDER
+  MONEYLINE
+  PLAYER_PROP
+  PARLAY
+  TEASER
+}
+
+enum BetResult {
+  WIN
+  LOSS
+  PUSH
+  PENDING
+}
+
+model Bet {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sport       Sport
+  betType     BetType
+  gameDate    DateTime
+  homeTeam    String
+  awayTeam    String
+  pickSide    String    // "home", "away", "over", "under", player name for props
+  line        Float?    // spread/total line
+  oddsValue   Int       @default(-110) // American odds: -110, +150, etc.
+  stake       Float     // amount wagered
+  toWin       Float     // amount to win (calculated from odds)
+  result      BetResult @default(PENDING)
+  profit      Float?    // + for win, - for loss, 0 for push (calculated on grading)
+  sportsbook  String?   // "DraftKings", "FanDuel", etc.
+  playerName  String?   // for PLAYER_PROP bets
+  propStat    String?   // "passing_yards", "rushing_yards", etc.
+  propLine    Float?    // prop-specific line
+  notes       String?   // user notes
+  parlayLegs  Json?     // for PARLAY/TEASER: [{homeTeam, awayTeam, pickSide, line}]
+  teaserPoints Float?   // for TEASER: points added (e.g., 6)
+  dailyPickId Int?      // link to DailyPick if bet originated from a pick
+  gradedAt    DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([userId, result])
+  @@index([userId, sport])
+  @@index([userId, gameDate])
+  @@index([userId, createdAt])
+  @@index([gameDate, homeTeam, awayTeam])
+  @@index([result])
 }
 
 // ─── DAILY PICKS ─────────────────────────────────────────────────────────
