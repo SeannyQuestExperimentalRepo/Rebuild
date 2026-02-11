@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { generateDailyPicks } from "@/lib/pick-engine";
 import type { Sport } from "@prisma/client";
+import { publicLimiter, applyRateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -20,6 +21,9 @@ function todayET(): string {
 }
 
 export async function GET(req: NextRequest) {
+  const limited = applyRateLimit(req, publicLimiter);
+  if (limited) return limited;
+
   try {
     const { searchParams } = req.nextUrl;
     const sport = searchParams.get("sport")?.toUpperCase();

@@ -1,8 +1,9 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 
 import { prisma } from "@/lib/db";
+import { authFlowLimiter, applyRateLimit } from "@/lib/rate-limit";
 
 const signupSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -10,7 +11,10 @@ const signupSchema = z.object({
   password: z.string().min(8, "Password must be at least 8 characters"),
 });
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
+  const limited = applyRateLimit(request, authFlowLimiter);
+  if (limited) return limited;
+
   try {
     const body = await request.json();
     const result = signupSchema.safeParse(body);

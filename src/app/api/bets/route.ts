@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/../../auth";
 import { prisma } from "@/lib/db";
 import type { Sport, BetType, BetResult } from "@prisma/client";
+import { authLimiter, applyRateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -53,6 +54,9 @@ export async function GET(req: NextRequest) {
         { status: 401 },
       );
     }
+
+    const limited = applyRateLimit(req, authLimiter, session.user.id);
+    if (limited) return limited;
 
     const { searchParams } = req.nextUrl;
     const sport = searchParams.get("sport")?.toUpperCase() as Sport | undefined;
@@ -139,6 +143,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const limited = applyRateLimit(req, authLimiter, session.user.id);
+    if (limited) return limited;
+
     const body = (await req.json()) as CreateBetBody;
 
     // Validate required fields
@@ -224,6 +231,9 @@ export async function PATCH(req: NextRequest) {
         { status: 401 },
       );
     }
+
+    const limited = applyRateLimit(req, authLimiter, session.user.id);
+    if (limited) return limited;
 
     const body = (await req.json()) as PatchBetBody;
 

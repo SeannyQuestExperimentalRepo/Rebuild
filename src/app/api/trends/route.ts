@@ -18,6 +18,7 @@ import {
   type TrendGame,
 } from "@/lib/trend-engine";
 import { enrichGameSummary } from "@/lib/significance-enrichment";
+import { queryLimiter, applyRateLimit } from "@/lib/rate-limit";
 
 // Vercel serverless config
 export const dynamic = "force-dynamic";
@@ -130,6 +131,9 @@ function errorResponse(message: string, status: number, details?: unknown) {
 // --- POST /api/trends ---
 
 export async function POST(request: NextRequest) {
+  const limited = applyRateLimit(request, queryLimiter);
+  if (limited) return limited;
+
   const start = performance.now();
 
   let body: unknown;
@@ -165,6 +169,9 @@ export async function POST(request: NextRequest) {
 // --- GET /api/trends ---
 
 export async function GET(request: NextRequest) {
+  const limited = applyRateLimit(request, queryLimiter);
+  if (limited) return limited;
+
   const start = performance.now();
   const { searchParams } = new URL(request.url);
 

@@ -8,12 +8,16 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { publicLimiter, applyRateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
 const VALID_SPORTS = ["NFL", "NCAAF", "NCAAMB"];
 
 export async function GET(request: NextRequest) {
+  const limited = applyRateLimit(request, publicLimiter);
+  if (limited) return limited;
+
   const { searchParams } = new URL(request.url);
   const sportParam = searchParams.get("sport")?.toUpperCase();
 
