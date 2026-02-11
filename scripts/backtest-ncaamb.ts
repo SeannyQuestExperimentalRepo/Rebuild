@@ -1060,8 +1060,7 @@ async function runBacktest() {
   console.log("\n" + "=".repeat(70));
   console.log("NOTES:");
   if (usePIT) {
-    console.log("• KenPom ratings: PIT (point-in-time) blended approach.");
-    console.log("  Prior season (2024) → current season (2025) blend by date.");
+    console.log("• KenPom/T-Rank ratings: PIT (point-in-time).");
     console.log("  No look-ahead bias ✓");
   } else {
     console.log("• KenPom ratings are current (end-of-season), NOT historical.");
