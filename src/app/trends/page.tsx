@@ -211,6 +211,13 @@ function AngleCard({
   rank: number;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const { atsPct, atsRecord, totalGames, wins, losses, winPct, ouRecord, overPct, avgMargin } = angle.record;
+  const pValue = angle.atsSignificance.pValue;
+  const pDisplay = pValue < 0.001 ? "<0.001" : pValue.toFixed(3);
+  const atsColor = atsPct >= 55 ? "text-emerald-400" : atsPct <= 45 ? "text-red-400" : "text-foreground";
+  const barColor = atsPct >= 55 ? "bg-emerald-500" : atsPct <= 45 ? "bg-red-500" : "bg-muted-foreground";
+
+  const whyItMatters = `${angle.headline} — covering at ${atsPct}% across ${totalGames} games. ${angle.atsSignificance.label}. Average margin of victory: ${avgMargin > 0 ? "+" : ""}${avgMargin.toFixed(1)} points.`;
 
   return (
     <div
@@ -224,33 +231,29 @@ function AngleCard({
 
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-3">
-            <div>
-              <h3 className="font-semibold leading-tight">{angle.headline}</h3>
-              <p className="mt-0.5 text-sm text-muted-foreground">{angle.label}</p>
-            </div>
+            <h3 className="font-semibold leading-tight">{angle.headline}</h3>
             <SignificanceBadge strength={angle.atsSignificance.strength} />
           </div>
 
-          <div className="mt-3 flex flex-wrap gap-4 text-sm">
-            <div>
-              <span className="text-muted-foreground">ATS: </span>
-              <span className={`font-mono font-semibold ${angle.record.atsPct >= 55 ? "text-emerald-400" : angle.record.atsPct <= 45 ? "text-red-400" : ""}`}>
-                {angle.record.atsRecord} ({angle.record.atsPct}%)
-              </span>
+          <div className="mt-3">
+            <div className="flex items-baseline gap-2">
+              <span className={`text-2xl font-bold font-mono ${atsColor}`}>{atsPct}%</span>
+              <span className="text-sm font-medium text-muted-foreground">ATS</span>
             </div>
-            <div>
-              <span className="text-muted-foreground">Record: </span>
-              <span className="font-mono font-medium">{angle.record.wins}-{angle.record.losses} ({angle.record.winPct}%)</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">O/U: </span>
-              <span className="font-mono">{angle.record.ouRecord} ({angle.record.overPct}% over)</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">n=</span>
-              <span className="font-mono">{angle.record.totalGames}</span>
+            <div className="mt-1.5 flex items-center gap-2.5">
+              <div className="h-1.5 flex-1 rounded-full bg-border/60 overflow-hidden max-w-[180px]">
+                <div
+                  className={`h-full rounded-full ${barColor} transition-all`}
+                  style={{ width: `${Math.min(atsPct, 100)}%` }}
+                />
+              </div>
+              <span className="font-mono text-xs text-muted-foreground">({atsRecord})</span>
             </div>
           </div>
+
+          <p className="mt-2 text-xs text-muted-foreground/70">
+            {totalGames} games · {angle.category}
+          </p>
         </div>
 
         <svg
@@ -262,33 +265,29 @@ function AngleCard({
       </div>
 
       {expanded && (
-        <div className="border-t border-border/30 px-5 py-4">
-          <div className="grid gap-4 text-sm sm:grid-cols-3">
-            <div>
-              <h4 className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground/70">ATS Significance</h4>
-              <p className="text-muted-foreground">{angle.atsSignificance.label}</p>
-              <p className="mt-1 font-mono text-xs text-muted-foreground">
-                p = {angle.atsSignificance.pValue < 0.001 ? "<0.001" : angle.atsSignificance.pValue.toFixed(3)}
-                {" \u00b7 "}z = {angle.atsSignificance.zScore.toFixed(2)}
-              </p>
-              <p className="font-mono text-xs text-muted-foreground">
-                95% CI: [{(angle.atsSignificance.confidenceInterval[0] * 100).toFixed(1)}%, {(angle.atsSignificance.confidenceInterval[1] * 100).toFixed(1)}%]
-              </p>
-            </div>
-            <div>
-              <h4 className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground/70">Scoring</h4>
-              <p className="font-mono text-xs text-muted-foreground">Avg margin: {angle.record.avgMargin > 0 ? "+" : ""}{angle.record.avgMargin.toFixed(1)}</p>
-              <p className="font-mono text-xs text-muted-foreground">Avg total: {angle.record.avgTotalPoints.toFixed(1)}</p>
-              {angle.record.avgSpread !== null && (
-                <p className="font-mono text-xs text-muted-foreground">Avg spread: {angle.record.avgSpread.toFixed(1)}</p>
-              )}
-            </div>
-            <div>
-              <h4 className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground/70">Category</h4>
-              <span className="rounded-md bg-secondary px-2 py-0.5 text-xs font-medium text-muted-foreground">{angle.category}</span>
-              <p className="mt-2 font-mono text-xs text-muted-foreground">Interest score: {Math.round(angle.interestScore)}</p>
-            </div>
+        <div className="border-t border-border/30 px-5 py-4 space-y-3">
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            {whyItMatters}
+          </p>
+
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+            <span>
+              <span className="text-muted-foreground/70">Record </span>
+              <span className="font-mono font-medium">{wins}-{losses} ({winPct}%)</span>
+            </span>
+            <span>
+              <span className="text-muted-foreground/70">O/U </span>
+              <span className="font-mono font-medium">{ouRecord} ({overPct}% over)</span>
+            </span>
+            <span>
+              <span className="text-muted-foreground/70">Avg margin </span>
+              <span className="font-mono font-medium">{avgMargin > 0 ? "+" : ""}{avgMargin.toFixed(1)}</span>
+            </span>
           </div>
+
+          <p className="text-xs text-muted-foreground/50 font-mono">
+            {angle.atsSignificance.strength.charAt(0).toUpperCase() + angle.atsSignificance.strength.slice(1)} · n={totalGames} · p={pDisplay}
+          </p>
         </div>
       )}
     </div>
