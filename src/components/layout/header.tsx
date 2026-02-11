@@ -11,6 +11,7 @@ const navItems = [
   { name: "NCAAMB", href: "/ncaamb" },
   { name: "Trends", href: "/trends" },
   { name: "Props", href: "/props" },
+  { name: "Bets", href: "/bets" },
   { name: "Today", href: "/today" },
 ];
 
