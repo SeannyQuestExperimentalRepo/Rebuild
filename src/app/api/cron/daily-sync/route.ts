@@ -26,7 +26,7 @@ import { clearKenpomCache } from "@/lib/kenpom";
 import type { Sport } from "@/lib/espn-api";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const SPORTS: Sport[] = ["NFL", "NCAAF", "NCAAMB"];
 
@@ -78,6 +78,58 @@ export async function POST(request: NextRequest) {
         results[`sync_${sport}`] = {
           error: err instanceof Error ? err.message : "Unknown error",
         };
+      }
+    }
+
+    // 2.5. Pre-generate today's daily picks for all sports
+    // Done here (after odds refresh) so picks are ready before users check
+    {
+      const { generateDailyPicks } = await import("@/lib/pick-engine");
+      const { prisma } = await import("@/lib/db");
+      const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+      const todayKey = new Date(todayStr + "T00:00:00Z");
+
+      for (const sport of SPORTS) {
+        try {
+          // Skip if picks already exist for today
+          const existing = await prisma.dailyPick.count({
+            where: { date: todayKey, sport },
+          });
+          if (existing > 0) {
+            results[`picks_${sport}`] = { skipped: true, existing };
+            continue;
+          }
+
+          const picks = await generateDailyPicks(todayStr, sport);
+          if (picks.length > 0) {
+            await prisma.dailyPick.createMany({
+              data: picks.map((p) => ({
+                date: todayKey,
+                sport: p.sport,
+                pickType: p.pickType,
+                homeTeam: p.homeTeam,
+                awayTeam: p.awayTeam,
+                gameDate: p.gameDate,
+                pickSide: p.pickSide,
+                line: p.line,
+                pickLabel: p.pickLabel,
+                playerName: p.playerName,
+                propStat: p.propStat,
+                propLine: p.propLine,
+                trendScore: p.trendScore,
+                confidence: p.confidence,
+                headline: p.headline,
+                reasoning: p.reasoning as unknown as import("@prisma/client").Prisma.InputJsonValue,
+              })),
+              skipDuplicates: true,
+            });
+          }
+          results[`picks_${sport}`] = { generated: picks.length };
+          console.log(`[Cron] Generated ${picks.length} picks for ${sport}`);
+        } catch (err) {
+          console.error(`[Cron] Pick generation failed for ${sport}:`, err);
+          results[`picks_${sport}`] = { error: err instanceof Error ? err.message : "Unknown error" };
+        }
       }
     }
 

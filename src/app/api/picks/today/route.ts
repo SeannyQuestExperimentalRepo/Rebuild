@@ -73,8 +73,28 @@ export async function GET(req: NextRequest) {
     let cached = true;
 
     if (allPicks.length === 0) {
-      // No picks yet — generate for ALL games on this date
       cached = false;
+
+      // Check how many games exist — if too many, skip inline generation
+      // (the daily cron pre-generates picks instead)
+      const gameCount = await prisma.upcomingGame.count({
+        where: { sport: sport as Sport, gameDate: { gte: dateKey } },
+      });
+
+      if (gameCount > 10) {
+        // Too many games for inline generation — return empty with message
+        return NextResponse.json({
+          success: true,
+          date,
+          sport,
+          picks: [],
+          cached: false,
+          tier: tier.label,
+          message: "Picks are being generated. Check back shortly.",
+        });
+      }
+
+      // Small slate — generate inline
       const generatedPicks = await generateDailyPicks(date, sport as Sport);
 
       if (generatedPicks.length > 0) {
