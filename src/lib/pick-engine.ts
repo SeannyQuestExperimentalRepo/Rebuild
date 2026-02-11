@@ -1,18 +1,25 @@
 /**
- * Daily Pick Engine v4
+ * Daily Pick Engine v5
  *
  * Signal Convergence Scoring Model — generates daily betting picks by
- * evaluating 7 independent signal categories:
+ * evaluating 8 independent signal categories:
  *
  *   1. Model Edge — KenPom predictions (NCAAMB) or power ratings (NFL/NCAAF)
- *   2. Season ATS — Wilson-adjusted ATS performance
+ *   2. Season ATS — Wilson-adjusted ATS performance (CONTRARIAN for NCAAMB)
  *   3. Trend Angles — auto-discovered via reverse lookup (50+ templates)
  *   4. Recent Form — last 5 game ATS momentum
  *   5. Head-to-Head — historical H2H ATS with Wilson intervals
  *   6. Situational — weather, rest advantages
  *   7. Rest/B2B — schedule fatigue (NCAAMB)
+ *   8. Tempo Differential — pace mismatch O/U signal (NCAAMB)
  *
- * v4 changes (backtest-validated on 5,523 NCAAMB games):
+ * v5 changes (41-experiment backtest on 5,523 NCAAMB games):
+ *   - Flipped ATS to contrarian/fade for NCAAMB (55.4% spread W%, +6% ROI)
+ *   - Added tempo differential O/U signal (5★ O/U +2.9% ROI)
+ *   - Disabled O/U convergence bonus (5★ O/U +2.6% ROI)
+ *   - Required minimum 3 active signals to generate a pick (+1.5% ROI)
+ *
+ * v4 changes:
  *   - Removed 3★ picks (were -5.5% ROI)
  *   - Fixed O/U sumDE thresholds (200-215 is UNDER, not OVER)
  *   - Added O/U line-range signal (155+ → UNDER at 68-70%)
@@ -103,11 +110,12 @@ const SPREAD_WEIGHTS: Record<string, Record<string, number>> = {
 
 const OU_WEIGHTS: Record<string, Record<string, number>> = {
   NCAAMB: {
-    modelEdge: 0.40, // sum_AdjDE is strongest O/U predictor (r=0.345, LOSO 65.1%)
-    seasonOU: 0.15,
-    trendAngles: 0.20,
-    recentForm: 0.10,
-    h2hWeather: 0.15,
+    modelEdge: 0.35, // sum_AdjDE is strongest O/U predictor (r=0.345, LOSO 65.1%)
+    seasonOU: 0.12,
+    trendAngles: 0.18,
+    recentForm: 0.08,
+    h2hWeather: 0.12,
+    tempoDiff: 0.15, // v5: tempo mismatch signal (5★ O/U +2.9% ROI)
   },
   NFL: {
     modelEdge: 0.20,
@@ -746,7 +754,7 @@ async function discoverTeamAngles(
 
 // ─── Signal Functions: Spread ────────────────────────────────────────────────
 
-function signalSeasonATS(homeStats: TeamStats, awayStats: TeamStats): SignalResult {
+function signalSeasonATS(homeStats: TeamStats, awayStats: TeamStats, sport: Sport = "NFL"): SignalResult {
   const homeTotal = homeStats.atsCovered + homeStats.atsLost;
   const awayTotal = awayStats.atsCovered + awayStats.atsLost;
 
@@ -759,7 +767,14 @@ function signalSeasonATS(homeStats: TeamStats, awayStats: TeamStats): SignalResu
     : 0;
 
   // Net edge: positive favors home
-  const netEdge = homeEdge - awayEdge;
+  let netEdge = homeEdge - awayEdge;
+
+  // v5: NCAAMB ATS fade — strong ATS records mean-revert (55.4% when fading, +6% ROI)
+  // Teams that have been covering tend to stop covering. Flip direction for contrarian edge.
+  if (sport === "NCAAMB") {
+    netEdge = -netEdge;
+  }
+
   const absMag = clamp(Math.abs(netEdge) * 50, 0, 10);
 
   // Confidence increases with sample size
@@ -780,13 +795,14 @@ function signalSeasonATS(homeStats: TeamStats, awayStats: TeamStats): SignalResu
   const favorsSide = netEdge > 0 ? "home" as const : "away" as const;
   const favStats = favorsSide === "home" ? homeStats : awayStats;
   const oppStats = favorsSide === "home" ? awayStats : homeStats;
+  const fadeLabel = sport === "NCAAMB" ? " (fade)" : "";
 
   return {
     category: "seasonATS",
     direction: favorsSide,
     magnitude: absMag,
     confidence: conf,
-    label: `Season ATS: ${favStats.atsCovered}-${favStats.atsLost} (${favStats.atsPct}%) vs opponent ${oppStats.atsCovered}-${oppStats.atsLost} (${oppStats.atsPct}%)`,
+    label: `Season ATS${fadeLabel}: ${favStats.atsCovered}-${favStats.atsLost} (${favStats.atsPct}%) vs opponent ${oppStats.atsCovered}-${oppStats.atsLost} (${oppStats.atsPct}%)`,
     strength: absMag >= 7 ? "strong" : absMag >= 3.5 ? "moderate" : "weak",
   };
 }
@@ -1083,6 +1099,71 @@ function signalRestDays(
   return { category: "restDays", direction: "neutral", magnitude: 0, confidence: 0, label: "Normal rest", strength: "noise" };
 }
 
+// ─── Signal: Tempo Differential (O/U) ────────────────────────────────────────
+// v5: Pace mismatch between teams predicts O/U outcomes.
+// Big tempo mismatch (≥8) → slower team drags game UNDER.
+// Both fast (avg >70, diff <4) → OVER. Both slow (avg <63, diff <4) → UNDER.
+
+function signalTempoDiff(
+  kenpomRatings: Map<string, KenpomRating> | null,
+  homeTeam: string,
+  awayTeam: string,
+): SignalResult {
+  const neutral: SignalResult = {
+    category: "tempoDiff", direction: "neutral",
+    magnitude: 0, confidence: 0, label: "N/A", strength: "noise",
+  };
+  if (!kenpomRatings) return neutral;
+
+  const homeR = lookupRating(kenpomRatings, homeTeam);
+  const awayR = lookupRating(kenpomRatings, awayTeam);
+  if (!homeR || !awayR) return neutral;
+
+  const tempoDiff = Math.abs(homeR.AdjTempo - awayR.AdjTempo);
+  const avgTempo = (homeR.AdjTempo + awayR.AdjTempo) / 2;
+
+  // Big tempo mismatch: slow team drags game under
+  if (tempoDiff >= 8) {
+    const slowerTempo = Math.min(homeR.AdjTempo, awayR.AdjTempo);
+    if (slowerTempo < 66) {
+      return {
+        category: "tempoDiff", direction: "under",
+        magnitude: 6, confidence: 0.72,
+        label: `Tempo mismatch ${tempoDiff.toFixed(1)} (slower team ${slowerTempo.toFixed(1)})`,
+        strength: "moderate",
+      };
+    }
+    return {
+      category: "tempoDiff", direction: "under",
+      magnitude: 4, confidence: 0.62,
+      label: `Tempo mismatch ${tempoDiff.toFixed(1)}`,
+      strength: "moderate",
+    };
+  }
+
+  // Both fast teams → over
+  if (avgTempo > 70 && tempoDiff < 4) {
+    return {
+      category: "tempoDiff", direction: "over",
+      magnitude: 5, confidence: 0.65,
+      label: `Both fast tempo ${avgTempo.toFixed(1)}`,
+      strength: "moderate",
+    };
+  }
+
+  // Both slow teams → under
+  if (avgTempo < 63 && tempoDiff < 4) {
+    return {
+      category: "tempoDiff", direction: "under",
+      magnitude: 5, confidence: 0.68,
+      label: `Both slow tempo ${avgTempo.toFixed(1)}`,
+      strength: "moderate",
+    };
+  }
+
+  return neutral;
+}
+
 // ─── Signal Functions: O/U ───────────────────────────────────────────────────
 
 function signalSeasonOU(homeStats: TeamStats, awayStats: TeamStats): SignalResult {
@@ -1308,6 +1389,7 @@ function computeConvergenceScore(
   signals: SignalResult[],
   weights: Record<string, number>,
   skipConvergenceBonus = false,
+  minActiveSignals = 0,
 ): {
   score: number;
   direction: "home" | "away" | "over" | "under";
@@ -1315,7 +1397,8 @@ function computeConvergenceScore(
 } {
   const activeSignals = signals.filter((s) => s.direction !== "neutral" && s.magnitude > 0);
 
-  if (activeSignals.length === 0) {
+  // v5: require minimum active signals to avoid noise picks
+  if (activeSignals.length === 0 || activeSignals.length < minActiveSignals) {
     return { score: 50, direction: "home", reasons: [] };
   }
 
@@ -1755,7 +1838,7 @@ export async function generateDailyPicks(
           if (game.spread !== null) {
             const spreadSignals: SignalResult[] = [
               modelPrediction.spread,
-              signalSeasonATS(homeStats, awayStats),
+              signalSeasonATS(homeStats, awayStats, sport),
               signalTrendAnglesSpread(homeDiscovery.ats, awayDiscovery.ats),
               signalRecentForm(homeStats, awayStats),
               signalH2HSpread(h2h),
@@ -1766,7 +1849,8 @@ export async function generateDailyPicks(
               signalRestDays(allGames, canonHome, canonAway, dateStr, sport),
             ];
 
-            const result = computeConvergenceScore(spreadSignals, sportWeightsSpread, true);
+            // v5: skip convergence bonus + require min 3 active signals
+            const result = computeConvergenceScore(spreadSignals, sportWeightsSpread, true, 3);
             const confidence = result.score >= 85 ? 5 : result.score >= 70 ? 4 : 0;
 
             if (confidence > 0) {
@@ -1807,7 +1891,13 @@ export async function generateDailyPicks(
               ),
             ];
 
-            const result = computeConvergenceScore(ouSignals, sportWeightsOU);
+            // v5: Add tempo differential signal for NCAAMB
+            if (sport === "NCAAMB") {
+              ouSignals.push(signalTempoDiff(kenpomRatings, game.homeTeam, game.awayTeam));
+            }
+
+            // v5: skip O/U convergence bonus + require min 3 active signals
+            const result = computeConvergenceScore(ouSignals, sportWeightsOU, true, 3);
             const confidence = result.score >= 85 ? 5 : result.score >= 70 ? 4 : 0;
 
             if (confidence > 0) {

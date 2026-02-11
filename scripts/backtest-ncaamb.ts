@@ -90,11 +90,12 @@ const SPREAD_WEIGHTS: Record<string, number> = {
 };
 
 const OU_WEIGHTS: Record<string, number> = {
-  modelEdge: 0.40,
-  seasonOU: 0.15,
-  recentForm: 0.10,
-  h2hWeather: 0.15,
-  // trendAngles: 0.20 — excluded from backtest
+  modelEdge: 0.35,
+  seasonOU: 0.12,
+  recentForm: 0.08,
+  h2hWeather: 0.12,
+  tempoDiff: 0.15, // v5: tempo mismatch signal
+  // trendAngles: 0.18 — excluded from backtest
 };
 
 function computeKenPomSpreadSignal(
@@ -244,7 +245,8 @@ function signalSeasonATS(homeStats: TeamStats, awayStats: TeamStats): SignalResu
   const homeEdge = homeTotal >= 5 ? wilsonInterval(homeStats.atsCovered, homeTotal)[0] - 0.5 : 0;
   const awayEdge = awayTotal >= 5 ? wilsonInterval(awayStats.atsCovered, awayTotal)[0] - 0.5 : 0;
 
-  const netEdge = homeEdge - awayEdge;
+  // v5: ATS fade — flip direction for contrarian mean-reversion (55.4% W%, +6% ROI)
+  const netEdge = -(homeEdge - awayEdge);
   const absMag = clamp(Math.abs(netEdge) * 50, 0, 10);
   const minGames = Math.min(homeTotal, awayTotal);
   const conf = clamp(0.3 + minGames * 0.02, 0.3, 0.8);
@@ -460,6 +462,61 @@ function signalH2HOU(
   };
 }
 
+// ─── Tempo Differential Signal (v5) ─────────────────────────────────────────
+
+function signalTempoDiff(
+  ratings: Map<string, KenpomRating> | null,
+  homeTeam: string,
+  awayTeam: string,
+): SignalResult {
+  const neutral: SignalResult = {
+    category: "tempoDiff", direction: "neutral",
+    magnitude: 0, confidence: 0, label: "N/A", strength: "noise",
+  };
+  if (!ratings) return neutral;
+
+  const homeR = lookupRating(ratings, homeTeam);
+  const awayR = lookupRating(ratings, awayTeam);
+  if (!homeR || !awayR) return neutral;
+
+  const tempoDiff = Math.abs(homeR.AdjTempo - awayR.AdjTempo);
+  const avgTempo = (homeR.AdjTempo + awayR.AdjTempo) / 2;
+
+  if (tempoDiff >= 8) {
+    const slowerTempo = Math.min(homeR.AdjTempo, awayR.AdjTempo);
+    if (slowerTempo < 66) {
+      return {
+        category: "tempoDiff", direction: "under",
+        magnitude: 6, confidence: 0.72,
+        label: `Tempo mismatch ${tempoDiff.toFixed(1)}`, strength: "moderate",
+      };
+    }
+    return {
+      category: "tempoDiff", direction: "under",
+      magnitude: 4, confidence: 0.62,
+      label: `Tempo mismatch ${tempoDiff.toFixed(1)}`, strength: "moderate",
+    };
+  }
+
+  if (avgTempo > 70 && tempoDiff < 4) {
+    return {
+      category: "tempoDiff", direction: "over",
+      magnitude: 5, confidence: 0.65,
+      label: `Both fast tempo ${avgTempo.toFixed(1)}`, strength: "moderate",
+    };
+  }
+
+  if (avgTempo < 63 && tempoDiff < 4) {
+    return {
+      category: "tempoDiff", direction: "under",
+      magnitude: 5, confidence: 0.68,
+      label: `Both slow tempo ${avgTempo.toFixed(1)}`, strength: "moderate",
+    };
+  }
+
+  return neutral;
+}
+
 // ─── Rest / B2B Signal ──────────────────────────────────────────────────────
 
 function signalRestDays(
@@ -510,9 +567,11 @@ function computeConvergenceScore(
   signals: SignalResult[],
   weights: Record<string, number>,
   skipConvergenceBonus = false,
+  minActiveSignals = 0,
 ): { score: number; direction: string } {
   const activeSignals = signals.filter((s) => s.direction !== "neutral" && s.magnitude > 0);
-  if (activeSignals.length === 0) return { score: 50, direction: "home" };
+  // v5: require minimum active signals
+  if (activeSignals.length === 0 || activeSignals.length < minActiveSignals) return { score: 50, direction: "home" };
 
   const directionSums: Record<string, number> = {};
   let totalPossibleWeight = 0;
@@ -721,7 +780,7 @@ async function runBacktest() {
           signalRestDays(tracker, homeTeamName, awayTeamName, game.gameDate),
         ];
 
-        const spreadResult = computeConvergenceScore(spreadSignals, SPREAD_WEIGHTS, true);
+        const spreadResult = computeConvergenceScore(spreadSignals, SPREAD_WEIGHTS, true, 3);
         const spreadConf = spreadResult.score >= 85 ? 5 : spreadResult.score >= 70 ? 4 : 0;
 
         if (spreadConf > 0 && game.spreadResult) {
@@ -752,9 +811,11 @@ async function runBacktest() {
             signalSeasonOU(homeStats, awayStats),
             signalRecentFormOU(homeStats, awayStats),
             signalH2HOU(allHistoricalGames, homeTeamName, awayTeamName, game.overUnder),
+            signalTempoDiff(kenpomRatings, homeTeamName, awayTeamName),
           ];
 
-          const ouResult = computeConvergenceScore(ouSignals, OU_WEIGHTS);
+          // v5: skip O/U convergence bonus + require min 3 active signals
+          const ouResult = computeConvergenceScore(ouSignals, OU_WEIGHTS, true, 3);
           const ouConf = ouResult.score >= 85 ? 5 : ouResult.score >= 70 ? 4 : 0;
 
           if (ouConf > 0) {
