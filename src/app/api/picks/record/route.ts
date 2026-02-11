@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { publicLimiter, applyRateLimit } from "@/lib/rate-limit";
 import { prisma } from "@/lib/db";
 import type { Sport } from "@prisma/client";
 
@@ -36,6 +37,9 @@ function buildBucket(picks: { result: string }[]): RecordBucket {
 }
 
 export async function GET(req: NextRequest) {
+  const limited = applyRateLimit(req, publicLimiter);
+  if (limited) return limited;
+
   try {
     const { searchParams } = req.nextUrl;
     const sport = searchParams.get("sport")?.toUpperCase();

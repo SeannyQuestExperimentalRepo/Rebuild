@@ -320,7 +320,7 @@ model SavedTrend {
   notifyEmail     Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user            User     @relation(fields: [userId], references: [id], onDelete: Restrict)
 
   @@index([userId])
   @@index([sport])
@@ -455,7 +455,7 @@ enum BetResult {
 model Bet {
   id          String    @id @default(cuid())
   userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Restrict)
   sport       Sport
   betType     BetType
   gameDate    DateTime

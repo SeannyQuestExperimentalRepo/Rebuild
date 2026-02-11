@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { queryLimiter, applyRateLimit } from "@/lib/rate-limit";
 import { z } from "zod";
 import {
   executePlayerTrendQueryFromDB,
@@ -27,7 +28,7 @@ const FilterOperatorSchema = z.enum([
 const TrendFilterSchema = z.object({
   field: z.string().min(1),
   operator: FilterOperatorSchema,
-  value: z.any(),
+  value: z.union([z.string(), z.number(), z.boolean(), z.array(z.union([z.string(), z.number()]))]),
 });
 
 const PlayerTrendQuerySchema = z.object({
@@ -101,6 +102,9 @@ function errorResponse(message: string, status: number, details?: unknown) {
 // --- POST /api/trends/players ---
 
 export async function POST(request: NextRequest) {
+  const limited = applyRateLimit(request, queryLimiter);
+  if (limited) return limited;
+
   const start = performance.now();
 
   let body: unknown;
@@ -122,16 +126,16 @@ export async function POST(request: NextRequest) {
     return formatResponse(result, durationMs);
   } catch (err) {
     console.error("[POST /api/trends/players] Error:", err);
-    return errorResponse(
-      err instanceof Error ? err.message : "Internal server error",
-      500,
-    );
+    return errorResponse("Internal server error", 500);
   }
 }
 
 // --- GET /api/trends/players ---
 
 export async function GET(request: NextRequest) {
+  const limited = applyRateLimit(request, queryLimiter);
+  if (limited) return limited;
+
   const start = performance.now();
   const { searchParams } = new URL(request.url);
 
@@ -188,9 +192,6 @@ export async function GET(request: NextRequest) {
     return formatResponse(result, durationMs);
   } catch (err) {
     console.error("[GET /api/trends/players] Error:", err);
-    return errorResponse(
-      err instanceof Error ? err.message : "Internal server error",
-      500,
-    );
+    return errorResponse("Internal server error", 500);
   }
 }

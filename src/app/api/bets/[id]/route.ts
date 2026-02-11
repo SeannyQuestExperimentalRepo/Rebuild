@@ -5,6 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { authLimiter, applyRateLimit } from "@/lib/rate-limit";
 import { auth } from "@/../../auth";
 import { prisma } from "@/lib/db";
 import type { BetResult } from "@prisma/client";
@@ -35,6 +36,9 @@ type RouteContext = { params: Promise<{ id: string }> };
 // ─── GET ─────────────────────────────────────────────────────────────────
 
 export async function GET(_req: NextRequest, context: RouteContext) {
+  const limited = applyRateLimit(_req, authLimiter);
+  if (limited) return limited;
+
   try {
     const session = await auth();
     if (!session?.user?.id) {
@@ -78,6 +82,9 @@ interface PatchBody {
 }
 
 export async function PATCH(req: NextRequest, context: RouteContext) {
+  const limited = applyRateLimit(req, authLimiter);
+  if (limited) return limited;
+
   try {
     const session = await auth();
     if (!session?.user?.id) {
@@ -143,6 +150,9 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
 // ─── DELETE ──────────────────────────────────────────────────────────────
 
 export async function DELETE(_req: NextRequest, context: RouteContext) {
+  const limited = applyRateLimit(_req, authLimiter);
+  if (limited) return limited;
+
   try {
     const session = await auth();
     if (!session?.user?.id) {

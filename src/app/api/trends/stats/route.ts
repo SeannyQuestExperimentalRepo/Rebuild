@@ -7,13 +7,17 @@
  * Uses direct Prisma aggregates instead of loading full game tables.
  */
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { publicLimiter, applyRateLimit } from "@/lib/rate-limit";
 import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const limited = applyRateLimit(req, publicLimiter);
+  if (limited) return limited;
+
   try {
     const start = performance.now();
 
@@ -101,7 +105,7 @@ export async function GET() {
     return NextResponse.json(
       {
         success: false,
-        error: err instanceof Error ? err.message : "Internal server error",
+        error: "Internal server error",
       },
       { status: 500 },
     );

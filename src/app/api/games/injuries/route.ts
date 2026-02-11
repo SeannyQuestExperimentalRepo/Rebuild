@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { publicLimiter, applyRateLimit } from "@/lib/rate-limit";
 import {
   fetchInjuries,
   getInjuriesForTeam,
@@ -22,6 +23,9 @@ function errorResponse(message: string, status: number) {
 }
 
 export async function GET(request: NextRequest) {
+  const limited = applyRateLimit(request, publicLimiter);
+  if (limited) return limited;
+
   const start = performance.now();
   const { searchParams } = new URL(request.url);
 
@@ -69,9 +73,6 @@ export async function GET(request: NextRequest) {
     return response;
   } catch (err) {
     console.error("[GET /api/games/injuries] Error:", err);
-    return errorResponse(
-      err instanceof Error ? err.message : "Internal server error",
-      500,
-    );
+    return errorResponse("Internal server error", 500);
   }
 }

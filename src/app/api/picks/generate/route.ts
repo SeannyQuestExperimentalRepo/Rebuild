@@ -20,16 +20,20 @@ function todayET(): string {
 }
 
 export async function POST(req: NextRequest) {
-  // Require CRON_SECRET for manual triggers
+  // Require CRON_SECRET (fail-closed: reject if not configured)
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authHeader = req.headers.get("authorization");
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 },
-      );
-    }
+  if (!cronSecret) {
+    return NextResponse.json(
+      { success: false, error: "CRON_SECRET not configured" },
+      { status: 500 },
+    );
+  }
+  const authHeader = req.headers.get("authorization");
+  if (authHeader !== `Bearer ${cronSecret}`) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 },
+    );
   }
 
   const sport = req.nextUrl.searchParams.get("sport")?.toUpperCase();

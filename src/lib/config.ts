@@ -1,3 +1,5 @@
+import "server-only";
+
 /**
  * Typed environment variable access with validation.
  * Throws at startup if required vars are missing.
@@ -17,8 +19,8 @@ export const config = {
   // Database
   databaseUrl: getEnvVar("DATABASE_URL"),
 
-  // NextAuth
-  nextAuthSecret: getEnvVar("NEXTAUTH_SECRET"),
+  // NextAuth (v5 uses AUTH_SECRET)
+  authSecret: getEnvVar("AUTH_SECRET"),
   nextAuthUrl: getEnvVar("NEXTAUTH_URL"),
 
   // Google OAuth
@@ -42,6 +44,9 @@ export const config = {
 
   // KenPom
   kenpomApiKey: getEnvVar("KENPOM_API_KEY"),
+
+  // CBBData (Barttorvik T-Rank archive)
+  cbdApiKey: getEnvVar("CBD_API_KEY"),
 
   // Cron
   cronSecret: getEnvVar("CRON_SECRET"),

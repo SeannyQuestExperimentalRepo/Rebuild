@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
       } catch (err) {
         console.error(`[Cron] Refresh failed for ${sport}:`, err);
         results[`refresh_${sport}`] = {
-          error: err instanceof Error ? err.message : "Unknown error",
+          error: "Unknown error",
         };
       }
     }
@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
       } catch (err) {
         console.error(`[Cron] Sync failed for ${sport}:`, err);
         results[`sync_${sport}`] = {
-          error: err instanceof Error ? err.message : "Unknown error",
+          error: "Unknown error",
         };
       }
     }
@@ -128,7 +128,7 @@ export async function POST(request: NextRequest) {
           console.log(`[Cron] Generated ${picks.length} picks for ${sport}`);
         } catch (err) {
           console.error(`[Cron] Pick generation failed for ${sport}:`, err);
-          results[`picks_${sport}`] = { error: err instanceof Error ? err.message : "Unknown error" };
+          results[`picks_${sport}`] = { error: "Unknown error" };
         }
       }
     }
@@ -141,7 +141,7 @@ export async function POST(request: NextRequest) {
       console.log(`[Cron] Graded ${gradeResult.graded} picks (${gradeResult.errors} errors)`);
     } catch (err) {
       console.error("[Cron] Pick grading failed:", err);
-      results.grade_picks = { error: err instanceof Error ? err.message : "Unknown error" };
+      results.grade_picks = { error: "Unknown error" };
     }
 
     // 4. Auto-grade pending bets (linked to picks or matched to games)
@@ -152,7 +152,7 @@ export async function POST(request: NextRequest) {
       console.log(`[Cron] Graded ${betResult.graded} bets (${betResult.errors} errors)`);
     } catch (err) {
       console.error("[Cron] Bet grading failed:", err);
-      results.grade_bets = { error: err instanceof Error ? err.message : "Unknown error" };
+      results.grade_bets = { error: "Unknown error" };
     }
 
     // 5. Evaluate saved trends against today's upcoming games
@@ -163,7 +163,7 @@ export async function POST(request: NextRequest) {
       console.log(`[Cron] Evaluated ${trendResult.evaluated} saved trends, ${trendResult.triggered} triggered`);
     } catch (err) {
       console.error("[Cron] Trend evaluation failed:", err);
-      results.trend_eval = { error: err instanceof Error ? err.message : "Unknown error" };
+      results.trend_eval = { error: "Unknown error" };
     }
 
     // 6. Invalidate in-memory caches so new data is visible
@@ -184,7 +184,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: err instanceof Error ? err.message : "Internal server error",
+        error: "Internal server error",
       },
       { status: 500 },
     );

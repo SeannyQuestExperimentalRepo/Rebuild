@@ -9,6 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { queryLimiter, applyRateLimit } from "@/lib/rate-limit";
 import { z } from "zod";
 import {
   executeReverseLookup,
@@ -57,6 +58,9 @@ function withCache(response: NextResponse): NextResponse {
 // --- POST /api/trends/angles ---
 
 export async function POST(request: NextRequest) {
+  const limited = applyRateLimit(request, queryLimiter);
+  if (limited) return limited;
+
   const start = performance.now();
 
   let body: unknown;
@@ -100,16 +104,16 @@ export async function POST(request: NextRequest) {
     }));
   } catch (err) {
     console.error("[POST /api/trends/angles] Error:", err);
-    return errorResponse(
-      err instanceof Error ? err.message : "Internal server error",
-      500,
-    );
+    return errorResponse("Internal server error", 500);
   }
 }
 
 // --- GET /api/trends/angles ---
 
 export async function GET(request: NextRequest) {
+  const limited = applyRateLimit(request, queryLimiter);
+  if (limited) return limited;
+
   const start = performance.now();
   const { searchParams } = new URL(request.url);
 
@@ -214,9 +218,6 @@ export async function GET(request: NextRequest) {
     }));
   } catch (err) {
     console.error("[GET /api/trends/angles] Error:", err);
-    return errorResponse(
-      err instanceof Error ? err.message : "Internal server error",
-      500,
-    );
+    return errorResponse("Internal server error", 500);
   }
 }

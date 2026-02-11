@@ -1,3 +1,5 @@
+import "server-only";
+
 /**
  * KenPom API client with in-memory caching.
  *

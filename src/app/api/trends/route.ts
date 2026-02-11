@@ -43,7 +43,7 @@ const FilterOperatorSchema = z.enum([
 const TrendFilterSchema = z.object({
   field: z.string().min(1, "Filter field is required"),
   operator: FilterOperatorSchema,
-  value: z.any(),
+  value: z.union([z.string(), z.number(), z.boolean(), z.array(z.union([z.string(), z.number()]))]),
 });
 
 const SportSchema = z.enum(["NFL", "NCAAF", "NCAAMB", "ALL"]);
@@ -161,7 +161,7 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     trackError(err, { route: "/api/trends", action: "POST" });
     return errorResponse(
-      err instanceof Error ? err.message : "Internal server error",
+      "Internal server error",
       500,
     );
   }
@@ -240,7 +240,7 @@ export async function GET(request: NextRequest) {
   } catch (err) {
     trackError(err, { route: "/api/trends", action: "GET" });
     return errorResponse(
-      err instanceof Error ? err.message : "Internal server error",
+      "Internal server error",
       500,
     );
   }

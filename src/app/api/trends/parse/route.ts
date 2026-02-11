@@ -9,12 +9,16 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { queryLimiter, applyRateLimit } from "@/lib/rate-limit";
 import { parseNaturalLanguageQuery } from "@/lib/nlp-query-parser";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
+  const limited = applyRateLimit(request, queryLimiter);
+  if (limited) return limited;
+
   const start = performance.now();
 
   let body: { query?: string };
@@ -64,7 +68,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         success: false,
-        error: err instanceof Error ? err.message : "Parse failed",
+        error: "Internal server error",
       },
       { status: 500 },
     );

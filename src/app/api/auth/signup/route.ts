@@ -8,7 +8,11 @@ import { authFlowLimiter, applyRateLimit } from "@/lib/rate-limit";
 const signupSchema = z.object({
   name: z.string().min(1, "Name is required"),
   email: z.string().email("Invalid email address"),
-  password: z.string().min(8, "Password must be at least 8 characters"),
+  password: z
+    .string()
+    .min(8, "Password must be at least 8 characters")
+    .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
+    .regex(/[0-9]/, "Password must contain at least one number"),
 });
 
 export async function POST(request: NextRequest) {
@@ -32,16 +36,8 @@ export async function POST(request: NextRequest) {
     const existingUser = await prisma.user.findUnique({ where: { email } });
 
     if (existingUser) {
-      // OAuth-only user — allow adding a password
-      if (!existingUser.password) {
-        const hashedPassword = await bcrypt.hash(password, 12);
-        await prisma.user.update({
-          where: { email },
-          data: { password: hashedPassword, name: name || existingUser.name },
-        });
-        return NextResponse.json({ success: true }, { status: 200 });
-      }
-
+      // Do NOT allow adding a password to an existing OAuth-only account
+      // without verifying ownership. Return generic error to avoid enumeration.
       return NextResponse.json(
         { error: "An account with this email already exists" },
         { status: 409 },

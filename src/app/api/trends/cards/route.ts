@@ -9,6 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { queryLimiter, applyRateLimit } from "@/lib/rate-limit";
 import { z } from "zod";
 import {
   executeTrendQueryCached,
@@ -36,7 +37,7 @@ export const maxDuration = 60;
 const FilterSchema = z.object({
   field: z.string().min(1),
   operator: z.enum(["eq", "neq", "gt", "gte", "lt", "lte", "in", "notIn", "contains", "between"]),
-  value: z.any(),
+  value: z.union([z.string(), z.number(), z.boolean(), z.array(z.union([z.string(), z.number()]))]),
 });
 
 const GameCardQuerySchema = z.object({
@@ -90,6 +91,9 @@ function errorResponse(message: string, status: number, details?: unknown) {
 // --- POST /api/trends/cards ---
 
 export async function POST(request: NextRequest) {
+  const limited = applyRateLimit(request, queryLimiter);
+  if (limited) return limited;
+
   const start = performance.now();
 
   let body: unknown;
@@ -155,9 +159,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     console.error("[POST /api/trends/cards] Error:", err);
-    return errorResponse(
-      err instanceof Error ? err.message : "Internal server error",
-      500,
-    );
+    return errorResponse("Internal server error", 500);
   }
 }

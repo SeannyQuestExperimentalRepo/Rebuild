@@ -46,6 +46,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.id = user.id;
         token.role = user.role;
       }
+      // Refresh role from DB every 5 minutes to pick up role changes
+      const now = Math.floor(Date.now() / 1000);
+      if (!token.roleRefreshedAt || now - (token.roleRefreshedAt as number) > 300) {
+        try {
+          const dbUser = await prisma.user.findUnique({
+            where: { id: token.id as string },
+            select: { role: true },
+          });
+          if (dbUser) {
+            token.role = dbUser.role;
+          }
+          token.roleRefreshedAt = now;
+        } catch {
+          // DB error is non-fatal — keep existing role
+        }
+      }
       return token;
     },
     async session({ session, token }) {

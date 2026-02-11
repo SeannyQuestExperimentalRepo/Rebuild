@@ -37,3 +37,14 @@ next-env.d.ts
 # data files (DB is source of truth — large JSON/CSV are seed artifacts)
 data/
 *.xlsx
+
+# IDE / editor
+.vscode/
+.idea/
+
+# performance benchmark logs
+perf-results/
+
+# AI prompts / internal docs
+PROMPT.md
+RALPH_LOG.md

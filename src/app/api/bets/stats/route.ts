@@ -9,6 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { authLimiter, applyRateLimit } from "@/lib/rate-limit";
 import { auth } from "@/../../auth";
 import { prisma } from "@/lib/db";
 import type { Sport } from "@prisma/client";
@@ -59,6 +60,9 @@ function computeStreak(
 }
 
 export async function GET(req: NextRequest) {
+  const limited = applyRateLimit(req, authLimiter);
+  if (limited) return limited;
+
   try {
     const session = await auth();
     if (!session?.user?.id) {

@@ -22,12 +22,11 @@
     "next": "14.2.35",
     "next-auth": "^5.0.0-beta.30",
     "openai": "^6.18.0",
-    "prisma": "^6.19.2",
     "react": "^18",
     "react-dom": "^18",
+    "server-only": "^0.0.1",
     "tailwind-merge": "^3.4.0",
     "tailwindcss-animate": "^1.0.7",
-    "xlsx": "^0.18.5",
     "zod": "^4.3.6"
   },
   "prisma": {
@@ -43,6 +42,7 @@
     "eslint-config-prettier": "^10.1.8",
     "postcss": "^8",
     "prettier": "^3.8.1",
+    "prisma": "^6.19.2",
     "tailwindcss": "^3.4.1",
     "ts-node": "^10.9.2",
     "typescript": "^5"
