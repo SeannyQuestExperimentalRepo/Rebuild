@@ -1587,14 +1587,11 @@ export async function generateDailyPicks(
   const dateStart = new Date(dateStr + "T00:00:00Z");
   const dateEnd = new Date(dateStr + "T23:59:59Z");
 
-  // For today's picks, only score games that haven't started yet
-  const now = new Date();
-  const effectiveStart = now > dateStart ? now : dateStart;
-
+  // Include all games for the requested date (even if some have tipped off)
   const upcomingGames = await prisma.upcomingGame.findMany({
     where: {
       sport,
-      gameDate: { gte: effectiveStart, lte: dateEnd },
+      gameDate: { gte: dateStart, lte: dateEnd },
     },
     orderBy: { gameDate: "asc" },
   });

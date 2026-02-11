@@ -30,9 +30,14 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // Use start of today (UTC) so all of today's games appear,
+    // even if some have already tipped off
+    const now = new Date();
+    const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: Record<string, any> = {
-      gameDate: { gte: new Date() },
+      gameDate: { gte: todayStart },
     };
     if (sportParam) {
       where.sport = sportParam;
