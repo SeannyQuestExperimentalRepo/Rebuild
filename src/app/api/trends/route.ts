@@ -19,6 +19,7 @@ import {
 } from "@/lib/trend-engine";
 import { enrichGameSummary } from "@/lib/significance-enrichment";
 import { queryLimiter, applyRateLimit } from "@/lib/rate-limit";
+import { trackError, trackTiming, startTimer } from "@/lib/error-tracking";
 
 // Vercel serverless config
 export const dynamic = "force-dynamic";
@@ -154,11 +155,13 @@ export async function POST(request: NextRequest) {
 
   try {
     const query = parsed.data as TrendQuery;
+    const timer = startTimer();
     const result = await executeTrendQueryCached(query);
-    const durationMs = Math.round(performance.now() - start);
+    const durationMs = timer();
+    trackTiming({ route: "/api/trends", method: "POST", durationMs, sport: query.sport });
     return formatResponse(result, durationMs);
   } catch (err) {
-    console.error("[POST /api/trends] Execution error:", err);
+    trackError(err, { route: "/api/trends", action: "POST" });
     return errorResponse(
       err instanceof Error ? err.message : "Internal server error",
       500,
@@ -232,11 +235,13 @@ export async function GET(request: NextRequest) {
       filters: [],
     });
 
+    const timer = startTimer();
     const result = await executeTrendQueryCached(query);
-    const durationMs = Math.round(performance.now() - start);
+    const durationMs = timer();
+    trackTiming({ route: "/api/trends", method: "GET", durationMs });
     return formatResponse(result, durationMs);
   } catch (err) {
-    console.error("[GET /api/trends] Execution error:", err);
+    trackError(err, { route: "/api/trends", action: "GET" });
     return errorResponse(
       err instanceof Error ? err.message : "Internal server error",
       500,
