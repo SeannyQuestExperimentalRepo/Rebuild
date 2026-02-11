@@ -7,7 +7,6 @@
  */
 
 import { prisma } from "./db";
-import type { Sport } from "@prisma/client";
 
 interface TrendQuery {
   sport?: string;

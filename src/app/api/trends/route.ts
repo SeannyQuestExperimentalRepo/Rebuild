@@ -135,8 +135,6 @@ export async function POST(request: NextRequest) {
   const limited = applyRateLimit(request, queryLimiter);
   if (limited) return limited;
 
-  const start = performance.now();
-
   let body: unknown;
   try {
     body = await request.json();
@@ -175,7 +173,6 @@ export async function GET(request: NextRequest) {
   const limited = applyRateLimit(request, queryLimiter);
   if (limited) return limited;
 
-  const start = performance.now();
   const { searchParams } = new URL(request.url);
 
   const sportParam = searchParams.get("sport");
