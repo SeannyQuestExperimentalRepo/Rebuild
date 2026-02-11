@@ -55,4 +55,5 @@ export const features = {
   CUSTOM_ALERTS: false,
   LLM_SEARCH: true,
   LIVE_ODDS: true,
+  DAILY_PICKS: true,
 } as const;

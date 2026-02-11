@@ -389,3 +389,33 @@ model PlayerGameLog {
   @@index([season, positionGroup])
   @@index([playerId])
 }
+
+// ─── DAILY PICKS ─────────────────────────────────────────────────────────
+
+model DailyPick {
+  id          Int      @id @default(autoincrement())
+  date        DateTime @db.Date
+  sport       Sport
+  pickType    String   // SPREAD, OVER_UNDER, PLAYER_PROP
+  homeTeam    String
+  awayTeam    String
+  gameDate    DateTime
+  pickSide    String   // home, away, over, under
+  line        Float?
+  pickLabel   String   // "Chiefs -7" or "Over 48.5" or "Mahomes Over 275.5 Pass Yds"
+  playerName  String?
+  propStat    String?
+  propLine    Float?
+  trendScore  Int      // 0-100
+  confidence  Int      // 3, 4, or 5
+  headline    String
+  reasoning   Json     // [{angle, weight, strength, record}]
+  result      String   @default("PENDING") // WIN, LOSS, PUSH, PENDING
+  actualValue Float?
+  gradedAt    DateTime?
+  createdAt   DateTime @default(now())
+
+  @@unique([date, sport, homeTeam, awayTeam, pickType, pickSide, playerName])
+  @@index([date, sport])
+  @@index([result])
+}

@@ -1,0 +1,195 @@
+"use client";
+
+import { useState } from "react";
+import { useDailyPicks, usePickRecord } from "@/hooks/use-daily-picks";
+import { TrackRecordBar } from "@/components/picks/track-record-bar";
+import { GamePickCard } from "@/components/picks/game-pick-card";
+import { PropPickCard } from "@/components/picks/prop-pick-card";
+
+const SPORTS = ["NFL", "NCAAF", "NCAAMB"] as const;
+
+function todayET(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+}
+
+function formatDate(date: string): string {
+  const d = new Date(date + "T12:00:00Z");
+  return d.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+export default function TodayPage() {
+  const [sport, setSport] = useState<string>("NFL");
+  const date = todayET();
+
+  const { data: picksData, isLoading, error: picksError } = useDailyPicks(sport, date);
+  const { data: recordData } = usePickRecord(sport, 30);
+
+  const error = picksError ? (picksError as Error).message : null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const picks: any[] = picksData?.picks || [];
+
+  // Separate picks into categories
+  const spreadPicks = picks.filter((p) => p.pickType === "SPREAD");
+  const ouPicks = picks.filter((p) => p.pickType === "OVER_UNDER");
+  const propPicks = picks.filter((p) => p.pickType === "PLAYER_PROP");
+
+  // Group game picks by matchup
+  const gameGroups = new Map<string, { spread?: typeof picks[0]; ou?: typeof picks[0] }>();
+  for (const p of spreadPicks) {
+    const key = `${p.awayTeam}@${p.homeTeam}`;
+    if (!gameGroups.has(key)) gameGroups.set(key, {});
+    gameGroups.get(key)!.spread = p;
+  }
+  for (const p of ouPicks) {
+    const key = `${p.awayTeam}@${p.homeTeam}`;
+    if (!gameGroups.has(key)) gameGroups.set(key, {});
+    gameGroups.get(key)!.ou = p;
+  }
+
+  // Top plays: picks with confidence >= 4
+  const topPlays = picks
+    .filter((p) => p.confidence >= 4 && p.pickType !== "PLAYER_PROP")
+    .sort((a, b) => b.trendScore - a.trendScore);
+
+  // Top play matchup keys
+  const topPlayKeys = new Set(
+    topPlays.map((p) => `${p.awayTeam}@${p.homeTeam}`),
+  );
+
+  // Remaining game groups (3-star)
+  const remainingGroups = Array.from(gameGroups.entries()).filter(
+    ([key]) => !topPlayKeys.has(key),
+  );
+
+  return (
+    <div className="mx-auto max-w-5xl px-4 py-8">
+      {/* Header */}
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Today&apos;s Sheet</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{formatDate(date)}</p>
+        </div>
+        <div className="flex rounded-lg border border-border">
+          {SPORTS.map((s) => (
+            <button
+              key={s}
+              onClick={() => setSport(s)}
+              className={`px-4 py-1.5 text-sm font-medium transition-colors first:rounded-l-lg last:rounded-r-lg ${
+                sport === s
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+              }`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Track Record */}
+      {recordData && (
+        <div className="mb-6">
+          <h2 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            Track Record (Last 30 Days)
+          </h2>
+          <TrackRecordBar
+            overall={recordData.overall}
+            byType={recordData.byType}
+            byConfidence={recordData.byConfidence}
+          />
+        </div>
+      )}
+
+      {/* Loading */}
+      {isLoading && (
+        <div className="flex flex-col items-center gap-3 py-16">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          <p className="text-sm text-muted-foreground">
+            Analyzing today&apos;s games...
+          </p>
+        </div>
+      )}
+
+      {/* Error */}
+      {error && !isLoading && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">
+          <p className="text-sm text-destructive">{error}</p>
+        </div>
+      )}
+
+      {/* No games */}
+      {!isLoading && !error && picks.length === 0 && (
+        <div className="rounded-xl border border-border bg-card px-6 py-12 text-center">
+          <p className="text-muted-foreground">
+            No {sport} games scheduled for today
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground/60">
+            Check back on game day for picks and analysis
+          </p>
+        </div>
+      )}
+
+      {/* Top Plays */}
+      {!isLoading && topPlays.length > 0 && (
+        <div className="mb-8">
+          <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-muted-foreground">
+            Top Plays
+          </h2>
+          <div className="space-y-3">
+            {Array.from(
+              new Map(
+                topPlays.map((p) => [`${p.awayTeam}@${p.homeTeam}`, p]),
+              ).keys(),
+            ).map((key) => {
+              const group = gameGroups.get(key);
+              return (
+                <GamePickCard
+                  key={key}
+                  spreadPick={group?.spread}
+                  ouPick={group?.ou}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Player Props */}
+      {!isLoading && propPicks.length > 0 && (
+        <div className="mb-8">
+          <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-muted-foreground">
+            Player Props
+          </h2>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {propPicks.map((p) => (
+              <PropPickCard key={p.id} pick={p} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* All Games (remaining 3-star) */}
+      {!isLoading && remainingGroups.length > 0 && (
+        <div className="mb-8">
+          <h2 className="mb-3 text-sm font-medium uppercase tracking-wider text-muted-foreground">
+            All Games
+          </h2>
+          <div className="space-y-3">
+            {remainingGroups.map(([key, group]) => (
+              <GamePickCard
+                key={key}
+                spreadPick={group.spread}
+                ouPick={group.ou}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

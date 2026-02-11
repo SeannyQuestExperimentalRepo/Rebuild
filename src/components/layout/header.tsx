@@ -37,6 +37,12 @@ export function Header() {
             >
               Trends
             </Link>
+            <Link
+              href="/today"
+              className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            >
+              Today
+            </Link>
           </nav>
         </div>
 
@@ -107,6 +113,13 @@ export function Header() {
             onClick={() => setMobileMenuOpen(false)}
           >
             Trends
+          </Link>
+          <Link
+            href="/today"
+            className="block rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-secondary hover:text-foreground"
+            onClick={() => setMobileMenuOpen(false)}
+          >
+            Today
           </Link>
           <Link
             href="/search"

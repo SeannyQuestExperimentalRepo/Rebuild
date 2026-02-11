@@ -202,6 +202,18 @@ export function HomeContent({ stats }: { stats: DatasetStats | null }) {
             </Link>
           ))}
         </div>
+
+        {/* Today's Sheet CTA */}
+        <div className="mt-6">
+          <Link
+            href="/today"
+            className="inline-flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-5 py-2.5 text-sm font-medium text-primary transition-colors hover:bg-primary/20"
+          >
+            <span className="text-base">&#9733;</span>
+            Today&apos;s Sheet
+            <span className="text-xs text-primary/60">&mdash; AI-powered daily picks</span>
+          </Link>
+        </div>
       </section>
 
       {/* Sport Cards */}

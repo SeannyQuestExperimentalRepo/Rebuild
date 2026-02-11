@@ -80,7 +80,18 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 3. Invalidate in-memory caches so new data is visible
+    // 3. Grade yesterday's daily picks
+    try {
+      const { gradeYesterdaysPicks } = await import("@/lib/pick-engine");
+      const gradeResult = await gradeYesterdaysPicks();
+      results.grade_picks = gradeResult;
+      console.log(`[Cron] Graded ${gradeResult.graded} picks (${gradeResult.errors} errors)`);
+    } catch (err) {
+      console.error("[Cron] Pick grading failed:", err);
+      results.grade_picks = { error: err instanceof Error ? err.message : "Unknown error" };
+    }
+
+    // 4. Invalidate in-memory caches so new data is visible
     clearGameCache();
     clearAnglesCache();
     console.log("[Cron] Game and angles caches cleared after sync");
