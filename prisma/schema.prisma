@@ -292,6 +292,7 @@ model User {
   email              String    @unique
   name               String?
   image              String?
+  password           String?
   role               UserRole  @default(FREE)
   subscriptionId     String?
   subscriptionStatus String?

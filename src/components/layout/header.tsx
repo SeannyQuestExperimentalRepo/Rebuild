@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { UserMenu } from "@/components/auth/user-menu";
 
 const navItems = [
   { name: "NFL", href: "/nfl" },
@@ -82,6 +83,8 @@ export function Header() {
             <span className="hidden lg:inline">Search trends...</span>
           </Link>
 
+          <UserMenu />
+
           {/* Mobile menu toggle */}
           <button
             className="md:hidden"
@@ -140,6 +143,13 @@ export function Header() {
             onClick={() => setMobileMenuOpen(false)}
           >
             Search
+          </Link>
+          <Link
+            href="/login"
+            className="block rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-secondary hover:text-foreground"
+            onClick={() => setMobileMenuOpen(false)}
+          >
+            Sign in
           </Link>
         </nav>
       )}
