@@ -53,11 +53,11 @@ interface CacheEntry<T> {
 const RATINGS_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const FANMATCH_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 
-let ratingsCache: CacheEntry<Map<string, KenpomRating>> | null = null;
+const ratingsCacheByseason = new Map<number, CacheEntry<Map<string, KenpomRating>>>();
 const fanMatchCache = new Map<string, CacheEntry<KenpomFanMatch[]>>();
 
 export function clearKenpomCache(): void {
-  ratingsCache = null;
+  ratingsCacheByseason.clear();
   fanMatchCache.clear();
 }
 
@@ -98,13 +98,14 @@ async function fetchKenpom<T>(params: Record<string, string>): Promise<T> {
 export async function getKenpomRatings(
   season?: number,
 ): Promise<Map<string, KenpomRating>> {
+  const y = season ?? getCurrentKenpomSeason();
   const now = Date.now();
 
-  if (ratingsCache && now - ratingsCache.fetchedAt < RATINGS_TTL_MS) {
-    return ratingsCache.data;
+  const cached = ratingsCacheByseason.get(y);
+  if (cached && now - cached.fetchedAt < RATINGS_TTL_MS) {
+    return cached.data;
   }
 
-  const y = season ?? getCurrentKenpomSeason();
   const raw = await fetchKenpom<KenpomRating[]>({
     endpoint: "ratings",
     y: String(y),
@@ -115,7 +116,7 @@ export async function getKenpomRatings(
     map.set(team.TeamName, team);
   }
 
-  ratingsCache = { data: map, fetchedAt: now };
+  ratingsCacheByseason.set(y, { data: map, fetchedAt: now });
   console.log(`[kenpom] Fetched ${map.size} team ratings for ${y}`);
   return map;
 }
@@ -217,6 +218,7 @@ const DB_TO_KENPOM: Record<string, string> = {
   "Saint Peter's": "Saint Peter's",
   "St. Peter's": "Saint Peter's",
   "St. Bonaventure": "St. Bonaventure",
+  "Saint Bonaventure": "St. Bonaventure",
   "Loyola Chicago": "Loyola Chicago",
   "Loyola (MD)": "Loyola MD",
   "Loyola Marymount": "Loyola Marymount",

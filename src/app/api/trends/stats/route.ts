@@ -44,17 +44,17 @@ export async function GET(req: NextRequest) {
         _min: { season: true },
         _max: { season: true },
       }),
-      prisma.nFLGame.count({
+      prisma.nFLGame.findFirst({
         where: { spread: { not: null } },
-        take: 1,
+        select: { id: true },
       }),
-      prisma.nCAAFGame.count({
+      prisma.nCAAFGame.findFirst({
         where: { weatherCategory: { not: null } },
-        take: 1,
+        select: { id: true },
       }),
-      prisma.nCAAMBGame.count({
+      prisma.nCAAMBGame.findFirst({
         where: { homeKenpomRank: { not: null } },
-        take: 1,
+        select: { id: true },
       }),
     ]);
 
@@ -79,17 +79,17 @@ export async function GET(req: NextRequest) {
         nfl: {
           totalGames: nflAgg._count,
           seasons: nflSeasons,
-          hasSpread: nflHasSpread > 0,
+          hasSpread: nflHasSpread !== null,
         },
         ncaaf: {
           totalGames: ncaafAgg._count,
           seasons: ncaafSeasons,
-          hasWeather: ncaafHasWeather > 0,
+          hasWeather: ncaafHasWeather !== null,
         },
         ncaamb: {
           totalGames: ncaambAgg._count,
           seasons: ncaambSeasons,
-          hasKenpom: ncaambHasKenpom > 0,
+          hasKenpom: ncaambHasKenpom !== null,
         },
         total: nflAgg._count + ncaafAgg._count + ncaambAgg._count,
       },

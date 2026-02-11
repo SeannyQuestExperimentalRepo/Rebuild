@@ -80,7 +80,7 @@ function GameOddsCard({ game }: { game: GameOdds }) {
               key={b.book}
               book={b}
               highlight={{
-                spread: game.bestSpread?.book === b.bookTitle,
+                spread: game.bestSpread?.book === b.book || game.bestSpread?.book === b.bookTitle,
               }}
             />
           ))}

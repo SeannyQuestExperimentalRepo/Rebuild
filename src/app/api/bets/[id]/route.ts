@@ -36,9 +36,6 @@ type RouteContext = { params: Promise<{ id: string }> };
 // ─── GET ─────────────────────────────────────────────────────────────────
 
 export async function GET(_req: NextRequest, context: RouteContext) {
-  const limited = applyRateLimit(_req, authLimiter);
-  if (limited) return limited;
-
   try {
     const session = await auth();
     if (!session?.user?.id) {
@@ -47,6 +44,9 @@ export async function GET(_req: NextRequest, context: RouteContext) {
         { status: 401 },
       );
     }
+
+    const limited = applyRateLimit(_req, authLimiter, session.user.id);
+    if (limited) return limited;
 
     const { id } = await context.params;
     const bet = await prisma.bet.findFirst({
@@ -82,9 +82,6 @@ interface PatchBody {
 }
 
 export async function PATCH(req: NextRequest, context: RouteContext) {
-  const limited = applyRateLimit(req, authLimiter);
-  if (limited) return limited;
-
   try {
     const session = await auth();
     if (!session?.user?.id) {
@@ -93,6 +90,9 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
         { status: 401 },
       );
     }
+
+    const limited = applyRateLimit(req, authLimiter, session.user.id);
+    if (limited) return limited;
 
     const { id } = await context.params;
     const existing = await prisma.bet.findFirst({
@@ -132,6 +132,18 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     if (body.sportsbook !== undefined) updateData.sportsbook = body.sportsbook;
     if (body.line !== undefined) updateData.line = body.line;
 
+    // Recalculate profit if stake/odds changed on an already-graded bet
+    const effectiveResult = (updateData.result as BetResult) ?? existing.result;
+    if (
+      effectiveResult !== "PENDING" &&
+      !updateData.profit &&
+      (body.stake !== undefined || body.oddsValue !== undefined)
+    ) {
+      const stake = (updateData.stake as number) ?? existing.stake;
+      const odds = (updateData.oddsValue as number) ?? existing.oddsValue;
+      updateData.profit = calculateProfit(stake, odds, effectiveResult);
+    }
+
     const updated = await prisma.bet.update({
       where: { id },
       data: updateData,
@@ -150,9 +162,6 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
 // ─── DELETE ──────────────────────────────────────────────────────────────
 
 export async function DELETE(_req: NextRequest, context: RouteContext) {
-  const limited = applyRateLimit(_req, authLimiter);
-  if (limited) return limited;
-
   try {
     const session = await auth();
     if (!session?.user?.id) {
@@ -161,6 +170,9 @@ export async function DELETE(_req: NextRequest, context: RouteContext) {
         { status: 401 },
       );
     }
+
+    const limited = applyRateLimit(_req, authLimiter, session.user.id);
+    if (limited) return limited;
 
     const { id } = await context.params;
     const existing = await prisma.bet.findFirst({

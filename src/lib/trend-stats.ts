@@ -249,6 +249,10 @@ export function analyzePlayerProp(
   const validValues = values.filter((v): v is number => v !== null);
   const total = validValues.length;
 
+  // Exclude exact-line pushes from the total
+  const pushes = validValues.filter((v) => v === line).length;
+  const totalExPush = total - pushes;
+
   let hits: number;
   if (direction === "over") {
     hits = validValues.filter((v) => v > line).length;
@@ -256,8 +260,8 @@ export function analyzePlayerProp(
     hits = validValues.filter((v) => v < line).length;
   }
 
-  const hitRate = total > 0 ? Math.round((hits / total) * 1000) / 10 : 0;
-  const significance = analyzeTrendSignificance(hits, total, 0.5);
+  const hitRate = totalExPush > 0 ? Math.round((hits / totalExPush) * 1000) / 10 : 0;
+  const significance = analyzeTrendSignificance(hits, totalExPush, 0.5);
 
   return {
     stat,

@@ -16,11 +16,11 @@ import {
   type TrendQuery,
 } from "@/lib/trend-engine";
 import {
-  executePlayerTrendQueryCached,
+  executePlayerTrendQueryFromDB,
   type PlayerTrendQuery,
 } from "@/lib/player-trend-engine";
 import {
-  executePlayerPropQuery,
+  executePlayerPropQueryFromDB,
   type PropQuery,
 } from "@/lib/prop-trend-engine";
 import {
@@ -132,7 +132,7 @@ export async function POST(request: NextRequest) {
         filters: query.filters,
         seasonRange: query.seasonRange,
       };
-      const result = executePlayerTrendQueryCached(playerQuery);
+      const result = await executePlayerTrendQueryFromDB(playerQuery);
       card = generatePlayerTrendCard(result);
     } else if (query.type === "prop") {
       const propQuery: PropQuery = {
@@ -146,7 +146,7 @@ export async function POST(request: NextRequest) {
         favDog: query.favDog,
         opponent: query.opponent,
       };
-      const result = executePlayerPropQuery(propQuery);
+      const result = await executePlayerPropQueryFromDB(propQuery);
       card = generatePropTrendCard(result);
     }
 

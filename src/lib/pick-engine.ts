@@ -2091,6 +2091,10 @@ async function gradePropPick(
 
   if (typeof actual !== "number") return null;
 
+  if (actual === pick.propLine) {
+    return { result: "PUSH", actualValue: actual };
+  }
+
   const hit = actual > pick.propLine;
 
   return {

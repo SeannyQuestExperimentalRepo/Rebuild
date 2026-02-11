@@ -59,36 +59,44 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const picks = await generateDailyPicks(dateStr, sport as Sport);
+  try {
+    const picks = await generateDailyPicks(dateStr, sport as Sport);
 
-  if (picks.length > 0) {
-    await prisma.dailyPick.createMany({
-      data: picks.map((p) => ({
-        date: dateKey,
-        sport: p.sport,
-        pickType: p.pickType,
-        homeTeam: p.homeTeam,
-        awayTeam: p.awayTeam,
-        gameDate: p.gameDate,
-        pickSide: p.pickSide,
-        line: p.line,
-        pickLabel: p.pickLabel,
-        playerName: p.playerName,
-        propStat: p.propStat,
-        propLine: p.propLine,
-        trendScore: p.trendScore,
-        confidence: p.confidence,
-        headline: p.headline,
-        reasoning: p.reasoning as unknown as import("@prisma/client").Prisma.InputJsonValue,
-      })),
-      skipDuplicates: true,
+    if (picks.length > 0) {
+      await prisma.dailyPick.createMany({
+        data: picks.map((p) => ({
+          date: dateKey,
+          sport: p.sport,
+          pickType: p.pickType,
+          homeTeam: p.homeTeam,
+          awayTeam: p.awayTeam,
+          gameDate: p.gameDate,
+          pickSide: p.pickSide,
+          line: p.line,
+          pickLabel: p.pickLabel,
+          playerName: p.playerName,
+          propStat: p.propStat,
+          propLine: p.propLine,
+          trendScore: p.trendScore,
+          confidence: p.confidence,
+          headline: p.headline,
+          reasoning: p.reasoning as unknown as import("@prisma/client").Prisma.InputJsonValue,
+        })),
+        skipDuplicates: true,
+      });
+    }
+
+    return NextResponse.json({
+      success: true,
+      sport,
+      date: dateStr,
+      generated: picks.length,
     });
+  } catch (err) {
+    console.error(`[POST /api/picks/generate] Error generating ${sport} picks:`, err);
+    return NextResponse.json(
+      { success: false, error: "Failed to generate picks" },
+      { status: 500 },
+    );
   }
-
-  return NextResponse.json({
-    success: true,
-    sport,
-    date: dateStr,
-    generated: picks.length,
-  });
 }

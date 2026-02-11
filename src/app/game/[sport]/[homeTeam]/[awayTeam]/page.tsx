@@ -145,9 +145,9 @@ interface MatchupData {
 
 export default function GameMatchupPage() {
   const params = useParams();
-  const sport = (params.sport as string)?.toUpperCase();
-  const homeTeam = decodeURIComponent(params.homeTeam as string);
-  const awayTeam = decodeURIComponent(params.awayTeam as string);
+  const sport = (params?.sport as string)?.toUpperCase() ?? "";
+  const homeTeam = params?.homeTeam ? decodeURIComponent(params.homeTeam as string) : "";
+  const awayTeam = params?.awayTeam ? decodeURIComponent(params.awayTeam as string) : "";
 
   const { data: matchupResult, isLoading: loading, error: queryError } = useMatchup(sport, homeTeam, awayTeam);
   const { data: injuriesData, isLoading: injuriesLoading } = useInjuries(sport, homeTeam, awayTeam);

@@ -203,15 +203,17 @@ function AnalysisResult({ analysis }: { analysis: ParlayAnalysis }) {
 }
 
 export default function ParlaysPage() {
-  const [legs, setLegs] = useState<Partial<ParlayLeg>[]>([
-    { type: "SPREAD", odds: -110, modelProb: 0.52 },
-    { type: "SPREAD", odds: -110, modelProb: 0.52 },
+  const [legIdCounter, setLegIdCounter] = useState(2);
+  const [legs, setLegs] = useState<(Partial<ParlayLeg> & { _id: number })[]>([
+    { _id: 0, type: "SPREAD", odds: -110, modelProb: 0.52 },
+    { _id: 1, type: "SPREAD", odds: -110, modelProb: 0.52 },
   ]);
   const [analysis, setAnalysis] = useState<ParlayAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const addLeg = () => {
-    setLegs([...legs, { type: "SPREAD", odds: -110, modelProb: 0.52 }]);
+    setLegs([...legs, { _id: legIdCounter, type: "SPREAD", odds: -110, modelProb: 0.52 }]);
+    setLegIdCounter((c) => c + 1);
   };
 
   const removeLeg = (index: number) => {
@@ -275,7 +277,7 @@ export default function ParlaysPage() {
       <div className="space-y-2">
         {legs.map((leg, i) => (
           <LegInput
-            key={i}
+            key={leg._id}
             index={i}
             leg={leg}
             onChange={updateLeg}

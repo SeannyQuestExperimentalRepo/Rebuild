@@ -3,9 +3,17 @@
 import { signIn } from "next-auth/react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-[60vh] items-center justify-center py-12"><div className="h-5 w-5 animate-spin rounded-full border-2 border-primary/20 border-t-primary" /></div>}>
+      <LoginPageInner />
+    </Suspense>
+  );
+}
+
+function LoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const rawCallback = searchParams.get("callbackUrl") ?? "/";
@@ -24,21 +32,25 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
 
-    const res = await signIn("credentials", {
-      email: email.toLowerCase().trim(),
-      password,
-      redirect: false,
-    });
+    try {
+      const res = await signIn("credentials", {
+        email: email.toLowerCase().trim(),
+        password,
+        redirect: false,
+      });
 
-    setLoading(false);
+      if (res?.error) {
+        setError("Invalid email or password");
+        return;
+      }
 
-    if (res?.error) {
-      setError("Invalid email or password");
-      return;
+      router.push(callbackUrl);
+      router.refresh();
+    } catch {
+      setError("An unexpected error occurred. Please try again.");
+    } finally {
+      setLoading(false);
     }
-
-    router.push(callbackUrl);
-    router.refresh();
   }
 
   return (

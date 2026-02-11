@@ -187,6 +187,12 @@ export async function POST(req: NextRequest) {
     }
 
     const odds = body.oddsValue ?? -110;
+    if (odds > -100 && odds < 100) {
+      return NextResponse.json(
+        { success: false, error: "Invalid odds: must be >= 100 or <= -100" },
+        { status: 400 },
+      );
+    }
     const toWin = body.stake * oddsToPayoutMultiplier(odds);
 
     const bet = await prisma.bet.create({

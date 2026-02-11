@@ -2,7 +2,7 @@
  * Subscription tier definitions and access control helpers.
  *
  * Tier structure:
- *   FREE    — basic access: trends, upcoming games, today's picks (3★ only)
+ *   FREE    — basic access: trends, upcoming games, today's picks (4★ only)
  *   PREMIUM — full access: all picks (4★/5★), bet tracking, props, advanced trends
  *   ADMIN   — everything + admin panel
  */
@@ -26,7 +26,7 @@ export const TIER_CONFIG: Record<Tier, TierConfig> = {
   FREE: {
     label: "Free",
     maxTrendsPerDay: 10,
-    maxPickStars: 3,
+    maxPickStars: 4,
     betTracking: false,
     playerProps: false,
     advancedTrends: false,
@@ -86,7 +86,7 @@ export function canSeePick(role: string | null | undefined, confidence: number):
 /** Features list for pricing page display */
 export const PRICING_FEATURES = [
   { key: "trends", free: "10/day", premium: "Unlimited", label: "Trend queries" },
-  { key: "picks", free: "3★ picks only", premium: "All picks (3-5★)", label: "Daily picks" },
+  { key: "picks", free: "4★ picks only", premium: "All picks (4-5★)", label: "Daily picks" },
   { key: "betTracking", free: false, premium: true, label: "Bet tracking & P/L" },
   { key: "playerProps", free: false, premium: true, label: "Player prop analysis" },
   { key: "advancedTrends", free: false, premium: true, label: "Advanced trend filters" },

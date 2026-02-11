@@ -58,40 +58,43 @@ export default function SignupPage() {
 
     setLoading(true);
 
-    const res = await fetch("/api/auth/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: form.name,
+    try {
+      const res = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.name,
+          email: form.email.toLowerCase().trim(),
+          password: form.password,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setServerError(data.error ?? "Something went wrong");
+        return;
+      }
+
+      // Auto-sign in after successful signup
+      const signInRes = await signIn("credentials", {
         email: form.email.toLowerCase().trim(),
         password: form.password,
-      }),
-    });
+        redirect: false,
+      });
 
-    if (!res.ok) {
-      const data = await res.json();
+      if (signInRes?.error) {
+        setServerError("Account created. Please sign in.");
+        router.push("/login");
+        return;
+      }
+
+      router.push("/");
+      router.refresh();
+    } catch {
+      setServerError("An unexpected error occurred. Please try again.");
+    } finally {
       setLoading(false);
-      setServerError(data.error ?? "Something went wrong");
-      return;
     }
-
-    // Auto-sign in after successful signup
-    const signInRes = await signIn("credentials", {
-      email: form.email.toLowerCase().trim(),
-      password: form.password,
-      redirect: false,
-    });
-
-    setLoading(false);
-
-    if (signInRes?.error) {
-      setServerError("Account created. Please sign in.");
-      router.push("/login");
-      return;
-    }
-
-    router.push("/");
-    router.refresh();
   }
 
   const inputClass =
