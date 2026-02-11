@@ -10,6 +10,9 @@ import { prisma } from "@/lib/db";
 import { generateDailyPicks } from "@/lib/pick-engine";
 import type { Sport } from "@prisma/client";
 import { publicLimiter, applyRateLimit } from "@/lib/rate-limit";
+import { auth } from "@/../../auth";
+import { getTierConfig } from "@/lib/subscription";
+import { features } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -25,6 +28,17 @@ export async function GET(req: NextRequest) {
   if (limited) return limited;
 
   try {
+    // Get user tier for pick filtering (optional auth — anonymous = FREE)
+    let userRole: string | null = null;
+    try {
+      const session = await auth();
+      userRole = session?.user?.role ?? null;
+    } catch {
+      // Auth failure is OK — treat as FREE tier
+    }
+    const tier = getTierConfig(userRole);
+    const maxStars = features.SUBSCRIPTIONS_ACTIVE ? tier.maxPickStars : 5;
+
     const { searchParams } = req.nextUrl;
     const sport = searchParams.get("sport")?.toUpperCase();
     const date = searchParams.get("date") || todayET();
@@ -59,8 +73,9 @@ export async function GET(req: NextRequest) {
     });
 
     if (existingPicks.length > 0) {
+      const filtered = existingPicks.filter((p) => p.confidence <= maxStars);
       return NextResponse.json(
-        { success: true, date, sport, picks: existingPicks, cached: true },
+        { success: true, date, sport, picks: filtered, cached: true, tier: tier.label },
         {
           headers: {
             "Cache-Control": "public, s-maxage=300, stale-while-revalidate=600",
@@ -114,8 +129,9 @@ export async function GET(req: NextRequest) {
       orderBy: [{ confidence: "desc" }, { trendScore: "desc" }],
     });
 
+    const filtered = savedPicks.filter((p) => p.confidence <= maxStars);
     return NextResponse.json(
-      { success: true, date, sport, picks: savedPicks, cached: false },
+      { success: true, date, sport, picks: filtered, cached: false, tier: tier.label },
       {
         headers: {
           "Cache-Control": "public, s-maxage=300, stale-while-revalidate=600",

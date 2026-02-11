@@ -10,6 +10,8 @@ import { auth } from "@/../../auth";
 import { prisma } from "@/lib/db";
 import type { Sport, BetType, BetResult } from "@prisma/client";
 import { authLimiter, applyRateLimit } from "@/lib/rate-limit";
+import { hasAccess } from "@/lib/subscription";
+import { features } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 
@@ -145,6 +147,13 @@ export async function POST(req: NextRequest) {
 
     const limited = applyRateLimit(req, authLimiter, session.user.id);
     if (limited) return limited;
+
+    if (features.SUBSCRIPTIONS_ACTIVE && !hasAccess(session.user.role, "betTracking")) {
+      return NextResponse.json(
+        { success: false, error: "Bet tracking requires a Premium subscription" },
+        { status: 403 },
+      );
+    }
 
     const body = (await req.json()) as CreateBetBody;
 
