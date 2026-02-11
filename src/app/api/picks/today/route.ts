@@ -43,10 +43,13 @@ export async function GET(req: NextRequest) {
     const dateKey = new Date(date + "T00:00:00Z");
 
     // Check if picks already exist in DB (cached path)
+    // Filter out games that have already started
+    const now = new Date();
     const existingPicks = await prisma.dailyPick.findMany({
       where: {
         date: dateKey,
         sport: sport as Sport,
+        gameDate: { gte: now },
       },
       orderBy: [{ confidence: "desc" }, { trendScore: "desc" }],
     });
@@ -103,7 +106,7 @@ export async function GET(req: NextRequest) {
 
     // Fetch back from DB to get IDs and consistent format
     const savedPicks = await prisma.dailyPick.findMany({
-      where: { date: dateKey, sport: sport as Sport },
+      where: { date: dateKey, sport: sport as Sport, gameDate: { gte: now } },
       orderBy: [{ confidence: "desc" }, { trendScore: "desc" }],
     });
 
