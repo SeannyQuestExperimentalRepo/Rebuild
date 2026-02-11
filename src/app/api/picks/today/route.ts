@@ -44,7 +44,10 @@ export async function GET(req: NextRequest) {
 
     // Check if picks already exist in DB (cached path)
     const existingPicks = await prisma.dailyPick.findMany({
-      where: { date: dateKey, sport: sport as Sport },
+      where: {
+        date: dateKey,
+        sport: sport as Sport,
+      },
       orderBy: [{ confidence: "desc" }, { trendScore: "desc" }],
     });
 

@@ -1,13 +1,21 @@
 /**
- * Daily Pick Engine v2
+ * Daily Pick Engine v3
  *
- * Generates explicit betting picks by scoring games against historical
- * trend data using:
- *   - Auto-discovery via executeTeamReverseLookup (50+ angle templates)
- *   - KenPom efficiency/tempo for NCAAMB
- *   - Wilson confidence intervals for conservative estimates
- *   - Effect-size–weighted scoring instead of flat weights
- *   - Prop splits (home/away, fav/dog) and opponent-specific analysis
+ * Signal Convergence Scoring Model — generates daily betting picks by
+ * evaluating 6 independent signal categories and measuring convergence:
+ *
+ *   1. Model Edge — KenPom predictions (NCAAMB) or power ratings (NFL/NCAAF)
+ *   2. Season ATS — Wilson-adjusted ATS performance
+ *   3. Trend Angles — auto-discovered via reverse lookup (50+ templates)
+ *   4. Recent Form — last 5 game ATS momentum
+ *   5. Head-to-Head — historical H2H ATS with Wilson intervals
+ *   6. Situational — weather, rest advantages
+ *
+ * Key innovation: convergence bonus when signals agree, contradiction
+ * penalty when strong signals disagree. Produces real variance:
+ *   - 3★ (55-69): mixed signals, modest edges
+ *   - 4★ (70-84): clear model edge + confirming angles
+ *   - 5★ (85+): rare full convergence across 4+ categories
  *
  * Also grades past picks after games complete.
  */
@@ -46,19 +54,67 @@ export interface GeneratedPick {
   reasoning: ReasoningEntry[];
 }
 
-interface SideScore {
-  home: number;
-  away: number;
-  homeReasons: ReasoningEntry[];
-  awayReasons: ReasoningEntry[];
+interface SignalResult {
+  category: string;
+  direction: "home" | "away" | "over" | "under" | "neutral";
+  magnitude: number; // 0-10
+  confidence: number; // 0-1
+  label: string;
+  strength: "strong" | "moderate" | "weak" | "noise";
 }
 
-interface OUSideScore {
-  over: number;
-  under: number;
-  overReasons: ReasoningEntry[];
-  underReasons: ReasoningEntry[];
-}
+// ─── Signal Weight Configs ───────────────────────────────────────────────────
+
+const SPREAD_WEIGHTS: Record<string, Record<string, number>> = {
+  NCAAMB: {
+    modelEdge: 0.30,
+    seasonATS: 0.15,
+    trendAngles: 0.25,
+    recentForm: 0.15,
+    h2h: 0.10,
+    situational: 0.05,
+  },
+  NFL: {
+    modelEdge: 0.20,
+    seasonATS: 0.15,
+    trendAngles: 0.25,
+    recentForm: 0.20,
+    h2h: 0.10,
+    situational: 0.10,
+  },
+  NCAAF: {
+    modelEdge: 0.20,
+    seasonATS: 0.15,
+    trendAngles: 0.25,
+    recentForm: 0.20,
+    h2h: 0.10,
+    situational: 0.10,
+  },
+};
+
+const OU_WEIGHTS: Record<string, Record<string, number>> = {
+  NCAAMB: {
+    modelEdge: 0.30,
+    seasonOU: 0.20,
+    trendAngles: 0.20,
+    recentForm: 0.15,
+    h2hWeather: 0.15,
+  },
+  NFL: {
+    modelEdge: 0.20,
+    seasonOU: 0.20,
+    trendAngles: 0.20,
+    recentForm: 0.15,
+    h2hWeather: 0.25,
+  },
+  NCAAF: {
+    modelEdge: 0.20,
+    seasonOU: 0.20,
+    trendAngles: 0.20,
+    recentForm: 0.15,
+    h2hWeather: 0.25,
+  },
+};
 
 // ─── Team Name Resolution ────────────────────────────────────────────────────
 
@@ -121,22 +177,7 @@ function clamp(val: number, min: number, max: number): number {
 }
 
 /**
- * Weight based on Wilson lower bound instead of raw percentage.
- * This is more conservative for small samples — a 70% rate in 10 games
- * gets less credit than 70% in 50 games.
- */
-function wilsonWeight(successes: number, trials: number, baseline: number = 0.5): number {
-  if (trials < 5) return 0;
-  const [lower] = wilsonInterval(successes, trials);
-  const edge = lower - baseline;
-  if (edge <= 0) return 0;
-  // Scale: 0.05 edge → ~3, 0.10 edge → ~6, 0.15+ edge → ~9+
-  return Math.round(edge * 60);
-}
-
-/**
  * Convert a DiscoveredAngle's interestScore to a pick weight.
- * interestScore typically ranges 20-90 for significant angles.
  */
 function interestToWeight(interestScore: number): number {
   if (interestScore >= 70) return 10;
@@ -281,28 +322,29 @@ function buildH2H(
   };
 }
 
-// ─── KenPom Analysis (NCAAMB) ───────────────────────────────────────────────
+// ─── Model Edge: KenPom (NCAAMB) ────────────────────────────────────────────
 
-interface KenPomSignal {
-  label: string;
-  weight: number;
-  strength: ReasoningEntry["strength"];
-  favorsSpread?: "home" | "away";
-  favorsOU?: "over" | "under";
-}
-
-function analyzeKenPom(
+function computeKenPomEdge(
   allGames: TrendGame[],
   homeTeam: string,
   awayTeam: string,
   sport: string,
   currentSeason: number,
-): KenPomSignal[] {
-  if (sport !== "NCAAMB") return [];
+  spread: number | null,
+  overUnder: number | null,
+): { spread: SignalResult; ou: SignalResult } {
+  const neutral: SignalResult = {
+    category: "modelEdge",
+    direction: "neutral",
+    magnitude: 0,
+    confidence: 0,
+    label: "No KenPom data available",
+    strength: "noise",
+  };
 
-  const signals: KenPomSignal[] = [];
+  if (sport !== "NCAAMB") return { spread: neutral, ou: { ...neutral } };
 
-  // Find most recent game for each team to get their latest KenPom ratings
+  // Find most recent game for each team to get latest KenPom ratings
   const homeRecent = allGames
     .filter((g) => g.sport === sport && g.season === currentSeason &&
       (g.homeTeam === homeTeam || g.awayTeam === homeTeam) &&
@@ -317,7 +359,9 @@ function analyzeKenPom(
         (g.awayTeam === awayTeam && g.awayAdjEM !== null)))
     .sort((a, b) => (b.gameDate || "").localeCompare(a.gameDate || ""));
 
-  if (homeRecent.length === 0 || awayRecent.length === 0) return signals;
+  if (homeRecent.length === 0 || awayRecent.length === 0) {
+    return { spread: neutral, ou: { ...neutral } };
+  }
 
   const hGame = homeRecent[0];
   const aGame = awayRecent[0];
@@ -331,97 +375,142 @@ function analyzeKenPom(
   const homeDE = hGame.homeTeam === homeTeam ? hGame.homeAdjDE : hGame.awayAdjDE;
   const awayDE = aGame.homeTeam === awayTeam ? aGame.homeAdjDE : aGame.awayAdjDE;
 
-  // 1. Efficiency margin gap
-  if (homeEM !== null && awayEM !== null) {
-    const emGap = homeEM - awayEM;
-    const absGap = Math.abs(emGap);
+  // Spread: predicted margin = homeEM - awayEM + 3.5 (HCA)
+  let spreadSignal: SignalResult = neutral;
+  if (homeEM !== null && awayEM !== null && spread !== null) {
+    const predictedMargin = homeEM - awayEM + 3.5;
+    const spreadEdge = predictedMargin + spread; // spread negative when home favored
+    const absMag = clamp(Math.abs(spreadEdge) / 0.7, 0, 10);
 
-    if (absGap >= 5) {
-      const favors = emGap > 0 ? "home" : "away";
-      const strength: ReasoningEntry["strength"] = absGap >= 15 ? "strong" : absGap >= 10 ? "moderate" : "weak";
-      const weight = absGap >= 15 ? 10 : absGap >= 10 ? 7 : 4;
-
-      signals.push({
-        label: `KenPom efficiency: ${homeTeam} ${homeEM > 0 ? "+" : ""}${homeEM.toFixed(1)} vs ${awayTeam} ${awayEM > 0 ? "+" : ""}${awayEM.toFixed(1)} (gap: ${emGap > 0 ? "+" : ""}${emGap.toFixed(1)})`,
-        weight,
-        strength,
-        favorsSpread: favors,
-      });
-    }
+    spreadSignal = {
+      category: "modelEdge",
+      direction: spreadEdge > 0.5 ? "home" : spreadEdge < -0.5 ? "away" : "neutral",
+      magnitude: absMag,
+      confidence: 0.8,
+      label: `KenPom: ${homeTeam} ${homeEM > 0 ? "+" : ""}${homeEM.toFixed(1)} vs ${awayTeam} ${awayEM > 0 ? "+" : ""}${awayEM.toFixed(1)}, predicted margin ${predictedMargin > 0 ? "+" : ""}${predictedMargin.toFixed(1)}, edge ${spreadEdge > 0 ? "+" : ""}${spreadEdge.toFixed(1)} pts`,
+      strength: absMag >= 7 ? "strong" : absMag >= 4 ? "moderate" : absMag >= 1.5 ? "weak" : "noise",
+    };
   }
 
-  // 2. Tempo mismatch → affects O/U
-  if (homeTempo !== null && awayTempo !== null) {
-    const avgTempo = (homeTempo + awayTempo) / 2;
-    // High combined tempo → higher-scoring game
-    if (avgTempo >= 72) {
-      signals.push({
-        label: `Fast-paced matchup: ${homeTeam} ${homeTempo.toFixed(1)} + ${awayTeam} ${awayTempo.toFixed(1)} tempo`,
-        weight: avgTempo >= 76 ? 6 : 4,
-        strength: avgTempo >= 76 ? "moderate" : "weak",
-        favorsOU: "over",
-      });
-    } else if (avgTempo <= 64) {
-      signals.push({
-        label: `Slow-paced matchup: ${homeTeam} ${homeTempo.toFixed(1)} + ${awayTeam} ${awayTempo.toFixed(1)} tempo`,
-        weight: avgTempo <= 62 ? 6 : 4,
-        strength: avgTempo <= 62 ? "moderate" : "weak",
-        favorsOU: "under",
-      });
-    }
+  // O/U: predicted total from tempo + efficiency
+  let ouSignal: SignalResult = { ...neutral };
+  if (homeTempo !== null && awayTempo !== null &&
+      homeOE !== null && awayOE !== null &&
+      homeDE !== null && awayDE !== null && overUnder !== null) {
+    const pace = (homeTempo + awayTempo) / 2;
+    const homeExpected = (homeOE / 100) * (awayDE / 100) * pace;
+    const awayExpected = (awayOE / 100) * (homeDE / 100) * pace;
+    const predictedTotal = homeExpected + awayExpected;
+    const totalEdge = predictedTotal - overUnder;
+    const absMag = clamp(Math.abs(totalEdge) / 1.5, 0, 10);
+
+    ouSignal = {
+      category: "modelEdge",
+      direction: totalEdge > 1.0 ? "over" : totalEdge < -1.0 ? "under" : "neutral",
+      magnitude: absMag,
+      confidence: 0.7,
+      label: `KenPom total: predicted ${predictedTotal.toFixed(1)} vs line ${overUnder} (${totalEdge > 0 ? "+" : ""}${totalEdge.toFixed(1)})`,
+      strength: absMag >= 6 ? "strong" : absMag >= 3 ? "moderate" : absMag >= 1 ? "weak" : "noise",
+    };
   }
 
-  // 3. Offensive vs Defensive matchup
-  if (homeOE !== null && awayDE !== null && awayOE !== null && homeDE !== null) {
-    // Home offense vs away defense
-    const homeOffEdge = homeOE - awayDE; // positive = home offense dominates
-    const awayOffEdge = awayOE - homeDE;
+  return { spread: spreadSignal, ou: ouSignal };
+}
 
-    if (homeOffEdge > 8 && awayOffEdge < -3) {
-      signals.push({
-        label: `${homeTeam} offense (${homeOE.toFixed(1)}) vs ${awayTeam} defense (${awayDE.toFixed(1)}): +${homeOffEdge.toFixed(1)} edge`,
-        weight: 5,
-        strength: "moderate",
-        favorsSpread: "home",
-      });
-    } else if (awayOffEdge > 8 && homeOffEdge < -3) {
-      signals.push({
-        label: `${awayTeam} offense (${awayOE.toFixed(1)}) vs ${homeTeam} defense (${homeDE.toFixed(1)}): +${awayOffEdge.toFixed(1)} edge`,
-        weight: 5,
-        strength: "moderate",
-        favorsSpread: "away",
-      });
+// ─── Model Edge: Power Rating (NFL/NCAAF) ───────────────────────────────────
+
+function computePowerRatingEdge(
+  allGames: TrendGame[],
+  homeTeam: string,
+  awayTeam: string,
+  sport: string,
+  currentSeason: number,
+  spread: number | null,
+  overUnder: number | null,
+): { spread: SignalResult; ou: SignalResult } {
+  const neutral: SignalResult = {
+    category: "modelEdge",
+    direction: "neutral",
+    magnitude: 0,
+    confidence: 0,
+    label: "Insufficient data for power rating",
+    strength: "noise",
+  };
+
+  function getTeamPR(team: string) {
+    const games = allGames.filter((g) =>
+      g.sport === sport && g.season === currentSeason &&
+      (g.homeTeam === team || g.awayTeam === team),
+    );
+    if (games.length < 4) return null;
+
+    let totalMargin = 0, totalFor = 0, totalAgainst = 0;
+    for (const g of games) {
+      const isHome = g.homeTeam === team;
+      const teamScore = isHome ? g.homeScore : g.awayScore;
+      const oppScore = isHome ? g.awayScore : g.homeScore;
+      totalMargin += teamScore - oppScore;
+      totalFor += teamScore;
+      totalAgainst += oppScore;
     }
+    return {
+      avgMargin: totalMargin / games.length,
+      avgFor: totalFor / games.length,
+      avgAgainst: totalAgainst / games.length,
+      gameCount: games.length,
+    };
   }
 
-  // 4. KenPom model predictions (check historical accuracy for these teams)
-  const kenpomGames = allGames.filter(
-    (g) =>
-      g.sport === sport &&
-      g.season === currentSeason &&
-      g.fmHomeWinProb !== null &&
-      ((g.homeTeam === homeTeam || g.awayTeam === homeTeam) ||
-        (g.homeTeam === awayTeam || g.awayTeam === awayTeam)),
+  const homePR = getTeamPR(homeTeam);
+  const awayPR = getTeamPR(awayTeam);
+
+  if (!homePR || !awayPR) return { spread: neutral, ou: { ...neutral } };
+
+  const hca = sport === "NFL" ? 2.5 : 3.0;
+  const predictedMargin = (homePR.avgMargin - awayPR.avgMargin) / 2 + hca;
+
+  // Predicted total
+  const homeExpected = (homePR.avgFor + awayPR.avgAgainst) / 2;
+  const awayExpected = (awayPR.avgFor + homePR.avgAgainst) / 2;
+  const predictedTotal = homeExpected + awayExpected;
+
+  // Lower confidence than KenPom — power rating is crude
+  const baseConfidence = clamp(
+    0.3 + (Math.min(homePR.gameCount, awayPR.gameCount) - 4) * 0.03,
+    0.3, 0.55,
   );
 
-  if (kenpomGames.length >= 10) {
-    let modelCorrect = 0;
-    for (const g of kenpomGames) {
-      const predicted = (g.fmHomeWinProb || 0) >= 0.5 ? "home" : "away";
-      const actual = g.scoreDifference > 0 ? "home" : g.scoreDifference < 0 ? "away" : null;
-      if (actual && predicted === actual) modelCorrect++;
-    }
-    const accuracy = Math.round((modelCorrect / kenpomGames.length) * 100);
-    if (accuracy >= 65) {
-      signals.push({
-        label: `KenPom model ${accuracy}% accurate for these teams this season (${modelCorrect}/${kenpomGames.length})`,
-        weight: accuracy >= 75 ? 4 : 2,
-        strength: accuracy >= 75 ? "moderate" : "weak",
-      });
-    }
+  // Spread signal
+  let spreadSignal: SignalResult = neutral;
+  if (spread !== null) {
+    const spreadEdge = predictedMargin + spread;
+    const absMag = clamp(Math.abs(spreadEdge) / 1.0, 0, 10);
+    spreadSignal = {
+      category: "modelEdge",
+      direction: spreadEdge > 1.0 ? "home" : spreadEdge < -1.0 ? "away" : "neutral",
+      magnitude: absMag,
+      confidence: baseConfidence,
+      label: `Power rating: predicted margin ${predictedMargin > 0 ? "+" : ""}${predictedMargin.toFixed(1)}, line ${spread > 0 ? "+" : ""}${spread}, edge ${spreadEdge > 0 ? "+" : ""}${spreadEdge.toFixed(1)}`,
+      strength: absMag >= 7 ? "strong" : absMag >= 4 ? "moderate" : absMag >= 1.5 ? "weak" : "noise",
+    };
   }
 
-  return signals;
+  // O/U signal
+  let ouSignal: SignalResult = { ...neutral };
+  if (overUnder !== null) {
+    const totalEdge = predictedTotal - overUnder;
+    const absMag = clamp(Math.abs(totalEdge) / 2.0, 0, 10);
+    ouSignal = {
+      category: "modelEdge",
+      direction: totalEdge > 2.0 ? "over" : totalEdge < -2.0 ? "under" : "neutral",
+      magnitude: absMag,
+      confidence: baseConfidence * 0.9,
+      label: `Power rating total: predicted ${predictedTotal.toFixed(1)} vs line ${overUnder} (${totalEdge > 0 ? "+" : ""}${totalEdge.toFixed(1)})`,
+      strength: absMag >= 5 ? "strong" : absMag >= 3 ? "moderate" : absMag >= 1 ? "weak" : "noise",
+    };
+  }
+
+  return { spread: spreadSignal, ou: ouSignal };
 }
 
 // ─── Auto-Discovered Angle Signals ──────────────────────────────────────────
@@ -433,7 +522,7 @@ interface AngleSignal {
   weight: number;
   favors: "home" | "away";
   strength: ReasoningEntry["strength"];
-  isATS: boolean; // true = ATS angle, false = SU angle
+  isATS: boolean;
 }
 
 interface OUAngleSignal {
@@ -488,7 +577,7 @@ async function discoverTeamAngles(
           label: `${team}: ${angle.template.label} O/U: ${angle.record.ouRecord}`,
           record: angle.record.ouRecord,
           rate: overPct,
-          weight: Math.round(weight * 0.7), // O/U angles slightly less weight
+          weight: Math.round(weight * 0.7),
           favors: overPct > 50 ? "over" : "under",
           strength: angle.ouSignificance.strength,
         });
@@ -501,322 +590,666 @@ async function discoverTeamAngles(
   return { ats, ou };
 }
 
-// ─── Spread Scoring (v2) ────────────────────────────────────────────────────
+// ─── Signal Functions: Spread ────────────────────────────────────────────────
 
-function scoreSpread(
-  homeStats: TeamStats,
-  awayStats: TeamStats,
-  h2h: H2HStats,
-  homeAngles: AngleSignal[],
-  awayAngles: AngleSignal[],
-  kenpomSignals: KenPomSignal[],
-): SideScore {
-  let home = 50, away = 50;
-  const homeReasons: ReasoningEntry[] = [];
-  const awayReasons: ReasoningEntry[] = [];
+function signalSeasonATS(homeStats: TeamStats, awayStats: TeamStats): SignalResult {
+  const homeTotal = homeStats.atsCovered + homeStats.atsLost;
+  const awayTotal = awayStats.atsCovered + awayStats.atsLost;
 
-  // Source 1: Season ATS (Wilson-weighted)
-  const homeW = wilsonWeight(homeStats.atsCovered, homeStats.atsCovered + homeStats.atsLost);
-  if (homeW > 0) {
-    home += homeW;
-    const [lower] = wilsonInterval(homeStats.atsCovered, homeStats.atsCovered + homeStats.atsLost);
-    homeReasons.push({
-      angle: `${homeStats.atsCovered}-${homeStats.atsLost} ATS (${homeStats.atsPct}%, floor ${(lower * 100).toFixed(0)}%)`,
-      weight: homeW,
-      strength: homeW >= 7 ? "strong" : homeW >= 4 ? "moderate" : "weak",
-      record: `${homeStats.atsCovered}-${homeStats.atsLost}`,
-    });
-  } else if (homeStats.atsCovered + homeStats.atsLost >= 10 && homeStats.atsPct < 45) {
-    const penalty = wilsonWeight(homeStats.atsLost, homeStats.atsCovered + homeStats.atsLost);
-    if (penalty > 0) {
-      away += penalty;
-      awayReasons.push({
-        angle: `Opponent ${homeStats.atsCovered}-${homeStats.atsLost} ATS (${homeStats.atsPct}%)`,
-        weight: penalty,
-        strength: penalty >= 7 ? "strong" : penalty >= 4 ? "moderate" : "weak",
-      });
-    }
-  }
+  // Wilson lower bound edge for each side
+  const homeEdge = homeTotal >= 5
+    ? wilsonInterval(homeStats.atsCovered, homeTotal)[0] - 0.5
+    : 0;
+  const awayEdge = awayTotal >= 5
+    ? wilsonInterval(awayStats.atsCovered, awayTotal)[0] - 0.5
+    : 0;
 
-  const awayW = wilsonWeight(awayStats.atsCovered, awayStats.atsCovered + awayStats.atsLost);
-  if (awayW > 0) {
-    away += awayW;
-    const [lower] = wilsonInterval(awayStats.atsCovered, awayStats.atsCovered + awayStats.atsLost);
-    awayReasons.push({
-      angle: `${awayStats.atsCovered}-${awayStats.atsLost} ATS (${awayStats.atsPct}%, floor ${(lower * 100).toFixed(0)}%)`,
-      weight: awayW,
-      strength: awayW >= 7 ? "strong" : awayW >= 4 ? "moderate" : "weak",
-      record: `${awayStats.atsCovered}-${awayStats.atsLost}`,
-    });
-  } else if (awayStats.atsCovered + awayStats.atsLost >= 10 && awayStats.atsPct < 45) {
-    const penalty = wilsonWeight(awayStats.atsLost, awayStats.atsCovered + awayStats.atsLost);
-    if (penalty > 0) {
-      home += penalty;
-      homeReasons.push({
-        angle: `Opponent ${awayStats.atsCovered}-${awayStats.atsLost} ATS (${awayStats.atsPct}%)`,
-        weight: penalty,
-        strength: penalty >= 7 ? "strong" : penalty >= 4 ? "moderate" : "weak",
-      });
-    }
-  }
+  // Net edge: positive favors home
+  const netEdge = homeEdge - awayEdge;
+  const absMag = clamp(Math.abs(netEdge) * 50, 0, 10);
 
-  // Source 2: H2H ATS (Wilson-weighted)
-  if (h2h.totalGames >= 3) {
-    const h2hTotal = h2h.homeAtsCov + h2h.homeAtsLost;
-    if (h2hTotal >= 3) {
-      const homeH2HW = wilsonWeight(h2h.homeAtsCov, h2hTotal);
-      const awayH2HW = wilsonWeight(h2h.homeAtsLost, h2hTotal);
-      const h2hPct = Math.round((h2h.homeAtsCov / h2hTotal) * 1000) / 10;
+  // Confidence increases with sample size
+  const minGames = Math.min(homeTotal, awayTotal);
+  const conf = clamp(0.3 + minGames * 0.02, 0.3, 0.8);
 
-      if (homeH2HW > 0) {
-        home += homeH2HW;
-        homeReasons.push({
-          angle: `H2H ATS: ${h2h.homeAtsCov}-${h2h.homeAtsLost} (${h2hPct}%)`,
-          weight: homeH2HW,
-          strength: homeH2HW >= 7 ? "strong" : homeH2HW >= 4 ? "moderate" : "weak",
-          record: `${h2h.homeAtsCov}-${h2h.homeAtsLost}`,
-        });
-      } else if (awayH2HW > 0) {
-        away += awayH2HW;
-        awayReasons.push({
-          angle: `H2H ATS: ${h2h.homeAtsLost}-${h2h.homeAtsCov} (${(100 - h2hPct).toFixed(1)}%)`,
-          weight: awayH2HW,
-          strength: awayH2HW >= 7 ? "strong" : awayH2HW >= 4 ? "moderate" : "weak",
-          record: `${h2h.homeAtsLost}-${h2h.homeAtsCov}`,
-        });
-      }
-    }
-  }
-
-  // Source 3: Auto-discovered angles (from reverse lookup)
-  const allAngles = [...homeAngles, ...awayAngles]
-    .sort((a, b) => b.weight - a.weight)
-    .slice(0, 8); // Cap at best 8 angles to avoid over-weighting
-
-  for (const signal of allAngles) {
-    const reason: ReasoningEntry = {
-      angle: `${signal.label}: ${signal.record} (${signal.rate}%)`,
-      weight: signal.weight,
-      strength: signal.strength,
-      record: signal.record,
+  if (absMag < 0.5) {
+    return {
+      category: "seasonATS",
+      direction: "neutral",
+      magnitude: 0,
+      confidence: 0,
+      label: `Season ATS: home ${homeStats.atsCovered}-${homeStats.atsLost}, away ${awayStats.atsCovered}-${awayStats.atsLost}`,
+      strength: "noise",
     };
-    if (signal.favors === "home") {
-      home += signal.weight;
-      homeReasons.push(reason);
-    } else {
-      away += signal.weight;
-      awayReasons.push(reason);
-    }
   }
 
-  // Source 4: KenPom (NCAAMB)
-  for (const kp of kenpomSignals) {
-    if (!kp.favorsSpread) continue;
-    const reason: ReasoningEntry = {
-      angle: kp.label,
-      weight: kp.weight,
-      strength: kp.strength,
-    };
-    if (kp.favorsSpread === "home") {
-      home += kp.weight;
-      homeReasons.push(reason);
-    } else {
-      away += kp.weight;
-      awayReasons.push(reason);
-    }
-  }
-
-  // Source 5: Recent form (last 5 ATS)
-  const homeLast5Total = homeStats.last5AtsCov + homeStats.last5AtsLost;
-  if (homeLast5Total >= 4) {
-    if (homeStats.last5AtsCov >= 4) {
-      home += 4;
-      homeReasons.push({ angle: `Hot streak: ${homeStats.last5AtsCov}-${homeStats.last5AtsLost} ATS last 5`, weight: 4, strength: "weak" });
-    } else if (homeStats.last5AtsLost >= 4) {
-      away += 4;
-      awayReasons.push({ angle: `Opponent cold: ${homeStats.last5AtsCov}-${homeStats.last5AtsLost} ATS last 5`, weight: 4, strength: "weak" });
-    }
-  }
-
-  const awayLast5Total = awayStats.last5AtsCov + awayStats.last5AtsLost;
-  if (awayLast5Total >= 4) {
-    if (awayStats.last5AtsCov >= 4) {
-      away += 4;
-      awayReasons.push({ angle: `Hot streak: ${awayStats.last5AtsCov}-${awayStats.last5AtsLost} ATS last 5`, weight: 4, strength: "weak" });
-    } else if (awayStats.last5AtsLost >= 4) {
-      home += 4;
-      homeReasons.push({ angle: `Opponent cold: ${awayStats.last5AtsCov}-${awayStats.last5AtsLost} ATS last 5`, weight: 4, strength: "weak" });
-    }
-  }
+  const favorsSide = netEdge > 0 ? "home" as const : "away" as const;
+  const favStats = favorsSide === "home" ? homeStats : awayStats;
+  const oppStats = favorsSide === "home" ? awayStats : homeStats;
 
   return {
-    home: clamp(home, 0, 100),
-    away: clamp(away, 0, 100),
-    homeReasons: homeReasons.sort((a, b) => b.weight - a.weight),
-    awayReasons: awayReasons.sort((a, b) => b.weight - a.weight),
+    category: "seasonATS",
+    direction: favorsSide,
+    magnitude: absMag,
+    confidence: conf,
+    label: `Season ATS: ${favStats.atsCovered}-${favStats.atsLost} (${favStats.atsPct}%) vs opponent ${oppStats.atsCovered}-${oppStats.atsLost} (${oppStats.atsPct}%)`,
+    strength: absMag >= 7 ? "strong" : absMag >= 3.5 ? "moderate" : "weak",
   };
 }
 
-// ─── O/U Scoring (v2) ───────────────────────────────────────────────────────
-
-function scoreOverUnder(
-  homeStats: TeamStats,
-  awayStats: TeamStats,
-  h2h: H2HStats,
-  currentOU: number | null,
-  homeOUAngles: OUAngleSignal[],
-  awayOUAngles: OUAngleSignal[],
-  kenpomSignals: KenPomSignal[],
-): OUSideScore {
-  let over = 50, under = 50;
-  const overReasons: ReasoningEntry[] = [];
-  const underReasons: ReasoningEntry[] = [];
-
-  // Source 1: Season O/U (Wilson-weighted)
-  const homeOUTotal = homeStats.overs + homeStats.unders;
-  if (homeOUTotal >= 8) {
-    const overW = wilsonWeight(homeStats.overs, homeOUTotal);
-    const underW = wilsonWeight(homeStats.unders, homeOUTotal);
-    if (overW > 0) {
-      over += overW;
-      overReasons.push({
-        angle: `Home team O/U: ${homeStats.overs}-${homeStats.unders} (${homeStats.overPct}% over)`,
-        weight: overW,
-        strength: overW >= 7 ? "strong" : overW >= 4 ? "moderate" : "weak",
-      });
-    } else if (underW > 0) {
-      under += underW;
-      underReasons.push({
-        angle: `Home team O/U: ${homeStats.unders}-${homeStats.overs} (${(100 - homeStats.overPct).toFixed(1)}% under)`,
-        weight: underW,
-        strength: underW >= 7 ? "strong" : underW >= 4 ? "moderate" : "weak",
-      });
-    }
-  }
-
-  const awayOUTotal = awayStats.overs + awayStats.unders;
-  if (awayOUTotal >= 8) {
-    const overW = wilsonWeight(awayStats.overs, awayOUTotal);
-    const underW = wilsonWeight(awayStats.unders, awayOUTotal);
-    if (overW > 0) {
-      over += overW;
-      overReasons.push({
-        angle: `Away team O/U: ${awayStats.overs}-${awayStats.unders} (${awayStats.overPct}% over)`,
-        weight: overW,
-        strength: overW >= 7 ? "strong" : overW >= 4 ? "moderate" : "weak",
-      });
-    } else if (underW > 0) {
-      under += underW;
-      underReasons.push({
-        angle: `Away team O/U: ${awayStats.unders}-${awayStats.overs} (${(100 - awayStats.overPct).toFixed(1)}% under)`,
-        weight: underW,
-        strength: underW >= 7 ? "strong" : underW >= 4 ? "moderate" : "weak",
-      });
-    }
-  }
-
-  // Source 2: H2H totals vs current line
-  if (h2h.totalGames >= 3 && currentOU !== null && h2h.avgTotalPoints > 0) {
-    const diff = h2h.avgTotalPoints - currentOU;
-    if (Math.abs(diff) >= 3) {
-      const w = Math.abs(diff) >= 7 ? 6 : 4;
-      if (diff > 0) {
-        over += w;
-        overReasons.push({
-          angle: `H2H avg total ${h2h.avgTotalPoints} vs line ${currentOU} (+${diff.toFixed(1)})`,
-          weight: w,
-          strength: Math.abs(diff) >= 7 ? "moderate" : "weak",
-        });
-      } else {
-        under += w;
-        underReasons.push({
-          angle: `H2H avg total ${h2h.avgTotalPoints} vs line ${currentOU} (${diff.toFixed(1)})`,
-          weight: w,
-          strength: Math.abs(diff) >= 7 ? "moderate" : "weak",
-        });
-      }
-    }
-
-    // H2H O/U trend (Wilson-weighted)
-    const h2hOUTotal = h2h.overs + h2h.unders;
-    if (h2hOUTotal >= 5) {
-      const h2hOverW = wilsonWeight(h2h.overs, h2hOUTotal);
-      const h2hUnderW = wilsonWeight(h2h.unders, h2hOUTotal);
-      const overPct = Math.round((h2h.overs / h2hOUTotal) * 1000) / 10;
-      if (h2hOverW > 0) {
-        over += h2hOverW;
-        overReasons.push({ angle: `H2H O/U: ${h2h.overs}-${h2h.unders} (${overPct}% over)`, weight: h2hOverW, strength: h2hOverW >= 5 ? "moderate" : "weak" });
-      } else if (h2hUnderW > 0) {
-        under += h2hUnderW;
-        underReasons.push({ angle: `H2H O/U: ${h2h.unders}-${h2h.overs} (${(100 - overPct).toFixed(1)}% under)`, weight: h2hUnderW, strength: h2hUnderW >= 5 ? "moderate" : "weak" });
-      }
-    }
-  }
-
-  // Source 3: Auto-discovered O/U angles
-  const allOUAngles = [...homeOUAngles, ...awayOUAngles]
-    .sort((a, b) => b.weight - a.weight)
-    .slice(0, 6);
-
-  for (const signal of allOUAngles) {
-    const reason: ReasoningEntry = {
-      angle: `${signal.label} (${signal.rate}%)`,
-      weight: signal.weight,
-      strength: signal.strength,
-      record: signal.record,
+function signalTrendAnglesSpread(
+  homeAngles: AngleSignal[],
+  awayAngles: AngleSignal[],
+): SignalResult {
+  const allAngles = [...homeAngles, ...awayAngles];
+  if (allAngles.length === 0) {
+    return {
+      category: "trendAngles",
+      direction: "neutral",
+      magnitude: 0,
+      confidence: 0,
+      label: "No trend angles discovered",
+      strength: "noise",
     };
-    if (signal.favors === "over") {
-      over += signal.weight;
-      overReasons.push(reason);
-    } else {
-      under += signal.weight;
-      underReasons.push(reason);
-    }
   }
 
-  // Source 4: KenPom tempo signals
-  for (const kp of kenpomSignals) {
-    if (!kp.favorsOU) continue;
-    const reason: ReasoningEntry = {
-      angle: kp.label,
-      weight: kp.weight,
-      strength: kp.strength,
+  // Weight by strength: strong=3, moderate=2, weak=1
+  const strengthMultiplier: Record<string, number> = { strong: 3, moderate: 2, weak: 1, noise: 0 };
+  let homeScore = 0, awayScore = 0, totalScore = 0, significantCount = 0;
+
+  for (const a of allAngles) {
+    const w = strengthMultiplier[a.strength] || 0;
+    if (w === 0) continue;
+    totalScore += w;
+    if (a.favors === "home") homeScore += w;
+    else awayScore += w;
+    if (a.strength === "strong" || a.strength === "moderate") significantCount++;
+  }
+
+  if (totalScore === 0) {
+    return {
+      category: "trendAngles",
+      direction: "neutral",
+      magnitude: 0,
+      confidence: 0,
+      label: "All trend angles are noise",
+      strength: "noise",
     };
-    if (kp.favorsOU === "over") {
-      over += kp.weight;
-      overReasons.push(reason);
-    } else {
-      under += kp.weight;
-      underReasons.push(reason);
-    }
   }
 
-  // Source 5: Recent form
-  if (homeStats.last5OUOvers + homeStats.last5OUUnders >= 4) {
-    if (homeStats.last5OUOvers >= 4) {
-      over += 3;
-      overReasons.push({ angle: `Home team: ${homeStats.last5OUOvers} overs in last 5`, weight: 3, strength: "weak" });
-    } else if (homeStats.last5OUUnders >= 4) {
-      under += 3;
-      underReasons.push({ angle: `Home team: ${homeStats.last5OUUnders} unders in last 5`, weight: 3, strength: "weak" });
-    }
+  const dominance = Math.abs(homeScore - awayScore) / totalScore;
+  const magnitude = clamp(dominance * 10 + significantCount * 0.5, 0, 10);
+  const conf = clamp(0.4 + significantCount * 0.08, 0.4, 0.9);
+  const dir = homeScore > awayScore ? "home" as const : homeScore < awayScore ? "away" as const : "neutral" as const;
+
+  const homeAngleCount = allAngles.filter((a) => a.favors === "home" && a.strength !== "noise").length;
+  const awayAngleCount = allAngles.filter((a) => a.favors === "away" && a.strength !== "noise").length;
+
+  return {
+    category: "trendAngles",
+    direction: dir,
+    magnitude,
+    confidence: conf,
+    label: `${homeAngleCount + awayAngleCount} angles: ${homeAngleCount} home, ${awayAngleCount} away (${significantCount} significant)`,
+    strength: magnitude >= 7 ? "strong" : magnitude >= 4 ? "moderate" : magnitude >= 1.5 ? "weak" : "noise",
+  };
+}
+
+function signalRecentForm(homeStats: TeamStats, awayStats: TeamStats): SignalResult {
+  const homeL5 = homeStats.last5AtsCov + homeStats.last5AtsLost;
+  const awayL5 = awayStats.last5AtsCov + awayStats.last5AtsLost;
+
+  if (homeL5 < 3 && awayL5 < 3) {
+    return {
+      category: "recentForm",
+      direction: "neutral",
+      magnitude: 0,
+      confidence: 0,
+      label: "Insufficient recent data",
+      strength: "noise",
+    };
   }
-  if (awayStats.last5OUOvers + awayStats.last5OUUnders >= 4) {
-    if (awayStats.last5OUOvers >= 4) {
-      over += 3;
-      overReasons.push({ angle: `Away team: ${awayStats.last5OUOvers} overs in last 5`, weight: 3, strength: "weak" });
-    } else if (awayStats.last5OUUnders >= 4) {
-      under += 3;
-      underReasons.push({ angle: `Away team: ${awayStats.last5OUUnders} unders in last 5`, weight: 3, strength: "weak" });
-    }
+
+  // Net momentum: positive = home hot, negative = away hot
+  const homeRate = homeL5 > 0 ? homeStats.last5AtsCov / homeL5 : 0.5;
+  const awayRate = awayL5 > 0 ? awayStats.last5AtsCov / awayL5 : 0.5;
+  const netMomentum = homeRate - awayRate;
+
+  let magnitude = clamp(Math.abs(netMomentum) * 10, 0, 10);
+
+  // Streak bonuses
+  if (homeStats.last5AtsCov >= 5) magnitude = Math.min(magnitude + 2, 10);
+  else if (homeStats.last5AtsCov >= 4) magnitude = Math.min(magnitude + 1, 10);
+  if (awayStats.last5AtsCov >= 5) magnitude = Math.min(magnitude + 2, 10);
+  else if (awayStats.last5AtsCov >= 4) magnitude = Math.min(magnitude + 1, 10);
+
+  const conf = clamp(0.4 + Math.min(homeL5, awayL5) * 0.08, 0.4, 0.7);
+
+  if (magnitude < 1) {
+    return {
+      category: "recentForm",
+      direction: "neutral",
+      magnitude: 0,
+      confidence: 0,
+      label: `Last 5 ATS: home ${homeStats.last5AtsCov}-${homeStats.last5AtsLost}, away ${awayStats.last5AtsCov}-${awayStats.last5AtsLost}`,
+      strength: "noise",
+    };
   }
 
   return {
-    over: clamp(over, 0, 100),
-    under: clamp(under, 0, 100),
-    overReasons: overReasons.sort((a, b) => b.weight - a.weight),
-    underReasons: underReasons.sort((a, b) => b.weight - a.weight),
+    category: "recentForm",
+    direction: netMomentum > 0 ? "home" : "away",
+    magnitude,
+    confidence: conf,
+    label: `Last 5 ATS: home ${homeStats.last5AtsCov}-${homeStats.last5AtsLost}, away ${awayStats.last5AtsCov}-${awayStats.last5AtsLost}`,
+    strength: magnitude >= 7 ? "strong" : magnitude >= 4 ? "moderate" : "weak",
   };
+}
+
+function signalH2HSpread(h2h: H2HStats): SignalResult {
+  if (h2h.totalGames < 3) {
+    return {
+      category: "h2h",
+      direction: "neutral",
+      magnitude: 0,
+      confidence: 0,
+      label: `H2H: ${h2h.totalGames} games (insufficient)`,
+      strength: "noise",
+    };
+  }
+
+  const h2hTotal = h2h.homeAtsCov + h2h.homeAtsLost;
+  if (h2hTotal < 3) {
+    return {
+      category: "h2h",
+      direction: "neutral",
+      magnitude: 0,
+      confidence: 0,
+      label: "H2H ATS data insufficient",
+      strength: "noise",
+    };
+  }
+
+  const [lower] = wilsonInterval(h2h.homeAtsCov, h2hTotal);
+  const edge = lower - 0.5;
+  const magnitude = clamp(Math.abs(edge) * 40, 0, 10);
+  const conf = clamp(0.3 + h2hTotal * 0.03, 0.3, 0.7);
+
+  if (magnitude < 0.5) {
+    return {
+      category: "h2h",
+      direction: "neutral",
+      magnitude: 0,
+      confidence: 0,
+      label: `H2H ATS: ${h2h.homeAtsCov}-${h2h.homeAtsLost} (even)`,
+      strength: "noise",
+    };
+  }
+
+  const h2hPct = Math.round((h2h.homeAtsCov / h2hTotal) * 100);
+
+  return {
+    category: "h2h",
+    direction: edge > 0 ? "home" : "away",
+    magnitude,
+    confidence: conf,
+    label: `H2H ATS: ${h2h.homeAtsCov}-${h2h.homeAtsLost} (${h2hPct}%) in ${h2hTotal} games`,
+    strength: magnitude >= 6 ? "strong" : magnitude >= 3 ? "moderate" : "weak",
+  };
+}
+
+function signalSituational(
+  forecastWindMph: number | null,
+  forecastTemp: number | null,
+  forecastCategory: string | null,
+  sport: string,
+): SignalResult {
+  if (sport === "NCAAMB") {
+    return {
+      category: "situational",
+      direction: "neutral",
+      magnitude: 0,
+      confidence: 0,
+      label: "Indoor sport",
+      strength: "noise",
+    };
+  }
+
+  let magnitude = 0;
+  const parts: string[] = [];
+
+  if (forecastWindMph !== null && forecastWindMph >= 20) {
+    magnitude += forecastWindMph >= 30 ? 4 : 2;
+    parts.push(`Wind: ${forecastWindMph} mph`);
+  }
+
+  if (forecastTemp !== null && forecastTemp <= 20) {
+    magnitude += 2;
+    parts.push(`Cold: ${forecastTemp}°F`);
+  }
+
+  if (forecastCategory === "SNOW") {
+    magnitude += 3;
+    parts.push("Snow game");
+  } else if (forecastCategory === "RAIN") {
+    magnitude += 1;
+    parts.push("Rain");
+  }
+
+  magnitude = clamp(magnitude, 0, 10);
+
+  if (magnitude < 1) {
+    return {
+      category: "situational",
+      direction: "neutral",
+      magnitude: 0,
+      confidence: 0,
+      label: "No significant situational factors",
+      strength: "noise",
+    };
+  }
+
+  return {
+    category: "situational",
+    direction: "home", // Weather generally favors home team
+    magnitude,
+    confidence: 0.4,
+    label: parts.join(", ") + " — home advantage",
+    strength: magnitude >= 5 ? "moderate" : "weak",
+  };
+}
+
+// ─── Signal Functions: O/U ───────────────────────────────────────────────────
+
+function signalSeasonOU(homeStats: TeamStats, awayStats: TeamStats): SignalResult {
+  const homeTotal = homeStats.overs + homeStats.unders;
+  const awayTotal = awayStats.overs + awayStats.unders;
+
+  const homeOverEdge = homeTotal >= 8
+    ? wilsonInterval(homeStats.overs, homeTotal)[0] - 0.5
+    : 0;
+  const awayOverEdge = awayTotal >= 8
+    ? wilsonInterval(awayStats.overs, awayTotal)[0] - 0.5
+    : 0;
+
+  // Average over lean of both teams
+  const avgOverLean = (homeOverEdge + awayOverEdge) / 2;
+  const absMag = clamp(Math.abs(avgOverLean) * 50, 0, 10);
+
+  const minGames = Math.min(homeTotal, awayTotal);
+  const conf = clamp(0.3 + minGames * 0.015, 0.3, 0.75);
+
+  if (absMag < 0.5) {
+    return {
+      category: "seasonOU",
+      direction: "neutral",
+      magnitude: 0,
+      confidence: 0,
+      label: `Season O/U: home ${homeStats.overs}-${homeStats.unders}, away ${awayStats.overs}-${awayStats.unders}`,
+      strength: "noise",
+    };
+  }
+
+  return {
+    category: "seasonOU",
+    direction: avgOverLean > 0 ? "over" : "under",
+    magnitude: absMag,
+    confidence: conf,
+    label: `Season O/U: home ${homeStats.overs}-${homeStats.unders} (${homeStats.overPct}%), away ${awayStats.overs}-${awayStats.unders} (${awayStats.overPct}%)`,
+    strength: absMag >= 6 ? "strong" : absMag >= 3 ? "moderate" : "weak",
+  };
+}
+
+function signalTrendAnglesOU(
+  homeOUAngles: OUAngleSignal[],
+  awayOUAngles: OUAngleSignal[],
+): SignalResult {
+  const allAngles = [...homeOUAngles, ...awayOUAngles];
+  if (allAngles.length === 0) {
+    return {
+      category: "trendAngles",
+      direction: "neutral",
+      magnitude: 0,
+      confidence: 0,
+      label: "No O/U trend angles",
+      strength: "noise",
+    };
+  }
+
+  const strengthMultiplier: Record<string, number> = { strong: 3, moderate: 2, weak: 1, noise: 0 };
+  let overScore = 0, underScore = 0, totalScore = 0, significantCount = 0;
+
+  for (const a of allAngles) {
+    const w = strengthMultiplier[a.strength] || 0;
+    if (w === 0) continue;
+    totalScore += w;
+    if (a.favors === "over") overScore += w;
+    else underScore += w;
+    if (a.strength === "strong" || a.strength === "moderate") significantCount++;
+  }
+
+  if (totalScore === 0) {
+    return {
+      category: "trendAngles",
+      direction: "neutral",
+      magnitude: 0,
+      confidence: 0,
+      label: "All O/U angles are noise",
+      strength: "noise",
+    };
+  }
+
+  const dominance = Math.abs(overScore - underScore) / totalScore;
+  const magnitude = clamp(dominance * 10 + significantCount * 0.5, 0, 10);
+  const conf = clamp(0.35 + significantCount * 0.08, 0.35, 0.85);
+  const dir = overScore > underScore ? "over" as const : overScore < underScore ? "under" as const : "neutral" as const;
+
+  return {
+    category: "trendAngles",
+    direction: dir,
+    magnitude,
+    confidence: conf,
+    label: `O/U angles: ${allAngles.filter((a) => a.favors === "over").length} over, ${allAngles.filter((a) => a.favors === "under").length} under (${significantCount} sig)`,
+    strength: magnitude >= 6 ? "strong" : magnitude >= 3 ? "moderate" : magnitude >= 1 ? "weak" : "noise",
+  };
+}
+
+function signalRecentFormOU(homeStats: TeamStats, awayStats: TeamStats): SignalResult {
+  const homeL5 = homeStats.last5OUOvers + homeStats.last5OUUnders;
+  const awayL5 = awayStats.last5OUOvers + awayStats.last5OUUnders;
+
+  if (homeL5 < 3 && awayL5 < 3) {
+    return {
+      category: "recentForm",
+      direction: "neutral",
+      magnitude: 0,
+      confidence: 0,
+      label: "Insufficient recent O/U data",
+      strength: "noise",
+    };
+  }
+
+  const homeOverRate = homeL5 > 0 ? homeStats.last5OUOvers / homeL5 : 0.5;
+  const awayOverRate = awayL5 > 0 ? awayStats.last5OUOvers / awayL5 : 0.5;
+  const avgOverLean = (homeOverRate + awayOverRate) / 2 - 0.5;
+
+  const magnitude = clamp(Math.abs(avgOverLean) * 20, 0, 10);
+  const conf = 0.5;
+
+  if (magnitude < 1) {
+    return {
+      category: "recentForm",
+      direction: "neutral",
+      magnitude: 0,
+      confidence: 0,
+      label: `Recent O/U: home ${homeStats.last5OUOvers}-${homeStats.last5OUUnders}, away ${awayStats.last5OUOvers}-${awayStats.last5OUUnders}`,
+      strength: "noise",
+    };
+  }
+
+  return {
+    category: "recentForm",
+    direction: avgOverLean > 0 ? "over" : "under",
+    magnitude,
+    confidence: conf,
+    label: `Recent O/U: home ${homeStats.last5OUOvers}-${homeStats.last5OUUnders}, away ${awayStats.last5OUOvers}-${awayStats.last5OUUnders}`,
+    strength: magnitude >= 6 ? "strong" : magnitude >= 3 ? "moderate" : "weak",
+  };
+}
+
+function signalH2HWeatherOU(
+  h2h: H2HStats,
+  overUnder: number | null,
+  forecastWindMph: number | null,
+  forecastTemp: number | null,
+  forecastCategory: string | null,
+  sport: string,
+): SignalResult {
+  let magnitude = 0;
+  let direction: "over" | "under" | "neutral" = "neutral";
+  const parts: string[] = [];
+  let conf = 0.4;
+
+  // H2H total vs line
+  if (h2h.totalGames >= 3 && overUnder !== null && h2h.avgTotalPoints > 0) {
+    const diff = h2h.avgTotalPoints - overUnder;
+    if (Math.abs(diff) >= 3) {
+      magnitude += clamp(Math.abs(diff) / 2, 0, 6);
+      direction = diff > 0 ? "over" : "under";
+      parts.push(`H2H avg ${h2h.avgTotalPoints.toFixed(1)} vs line ${overUnder} (${diff > 0 ? "+" : ""}${diff.toFixed(1)})`);
+      conf = Math.min(conf + 0.1, 0.7);
+    }
+
+    // H2H O/U record
+    const h2hOUTotal = h2h.overs + h2h.unders;
+    if (h2hOUTotal >= 5) {
+      const overPct = h2h.overs / h2hOUTotal;
+      if (Math.abs(overPct - 0.5) > 0.15) {
+        magnitude += 2;
+        if (direction === "neutral") direction = overPct > 0.5 ? "over" : "under";
+        parts.push(`H2H O/U: ${h2h.overs}-${h2h.unders}`);
+      }
+    }
+  }
+
+  // Weather effects (NFL/NCAAF only)
+  if (sport !== "NCAAMB") {
+    if (forecastWindMph !== null && forecastWindMph >= 15) {
+      const windBonus = forecastWindMph >= 25 ? 4 : forecastWindMph >= 20 ? 3 : 2;
+      magnitude += windBonus;
+      if (direction === "neutral") direction = "under";
+      parts.push(`Wind: ${forecastWindMph} mph`);
+      conf = Math.min(conf + 0.1, 0.7);
+    }
+
+    if (forecastTemp !== null && forecastTemp <= 25) {
+      magnitude += 2;
+      if (direction === "neutral") direction = "under";
+      parts.push(`Cold: ${forecastTemp}°F`);
+    }
+
+    if (forecastCategory === "SNOW" || forecastCategory === "RAIN") {
+      magnitude += 2;
+      if (direction === "neutral") direction = "under";
+      parts.push(`Weather: ${forecastCategory.toLowerCase()}`);
+    }
+  }
+
+  magnitude = clamp(magnitude, 0, 10);
+
+  if (magnitude < 0.5) {
+    return {
+      category: "h2hWeather",
+      direction: "neutral",
+      magnitude: 0,
+      confidence: 0,
+      label: "No significant H2H/weather O/U signal",
+      strength: "noise",
+    };
+  }
+
+  return {
+    category: "h2hWeather",
+    direction,
+    magnitude,
+    confidence: conf,
+    label: parts.join(" | ") || "H2H + weather factors",
+    strength: magnitude >= 6 ? "strong" : magnitude >= 3 ? "moderate" : "weak",
+  };
+}
+
+// ─── Convergence Scoring ─────────────────────────────────────────────────────
+
+function computeConvergenceScore(
+  signals: SignalResult[],
+  weights: Record<string, number>,
+): {
+  score: number;
+  direction: "home" | "away" | "over" | "under";
+  reasons: ReasoningEntry[];
+} {
+  const activeSignals = signals.filter((s) => s.direction !== "neutral" && s.magnitude > 0);
+
+  if (activeSignals.length === 0) {
+    return { score: 50, direction: "home", reasons: [] };
+  }
+
+  // Weighted sums per direction, normalized against total possible weight
+  const directionSums: Record<string, number> = {};
+  let totalPossibleWeight = 0;
+
+  for (const signal of signals) {
+    const w = weights[signal.category] || 0.1;
+    totalPossibleWeight += w * 10; // max magnitude=10, confidence=1
+
+    if (signal.direction === "neutral" || signal.magnitude <= 0) continue;
+    const effectiveWeight = w * signal.magnitude * signal.confidence;
+    directionSums[signal.direction] = (directionSums[signal.direction] || 0) + effectiveWeight;
+  }
+
+  // Pick winning direction
+  let bestDir = "home" as string;
+  let bestSum = 0;
+  let totalWeight = 0;
+
+  for (const [dir, sum] of Object.entries(directionSums)) {
+    totalWeight += sum;
+    if (sum > bestSum) {
+      bestSum = sum;
+      bestDir = dir;
+    }
+  }
+
+  const oppositeSum = totalWeight - bestSum;
+
+  // Raw strength: how much winning side dominates vs theoretical max
+  // This naturally produces variance — weak/mixed signals stay low
+  const rawStrength = totalPossibleWeight > 0
+    ? (bestSum - oppositeSum) / totalPossibleWeight
+    : 0;
+
+  let score = 50 + rawStrength * 80;
+
+  // ── Convergence bonus: when many signals agree ──
+  const nonNeutralCount = activeSignals.length;
+  const agreeingCount = activeSignals.filter((s) => s.direction === bestDir).length;
+  const agreeRatio = nonNeutralCount > 0 ? agreeingCount / nonNeutralCount : 0;
+
+  if (agreeRatio >= 0.8 && nonNeutralCount >= 3) score += 8;
+  else if (agreeRatio >= 0.6 && nonNeutralCount >= 3) score += 4;
+
+  // ── Contradiction penalty: strong opposing signals ──
+  const strongDisagreeing = activeSignals.filter(
+    (s) => s.direction !== bestDir && (s.strength === "strong" || s.strength === "moderate"),
+  ).length;
+  if (strongDisagreeing >= 2) score -= 10;
+  else if (strongDisagreeing === 1) score -= 5;
+
+  // ── Statistical evidence bonus: multiple strong/moderate signals agreeing ──
+  const strongModerateAgreeing = activeSignals.filter(
+    (s) => s.direction === bestDir && (s.strength === "strong" || s.strength === "moderate"),
+  ).length;
+  if (strongModerateAgreeing >= 3) score += 6;
+  else if (strongModerateAgreeing >= 2) score += 3;
+
+  score = clamp(Math.round(score), 0, 100);
+
+  // Build reasoning from all non-noise signals
+  const reasons: ReasoningEntry[] = activeSignals
+    .filter((s) => s.strength !== "noise")
+    .sort((a, b) => {
+      const aWin = a.direction === bestDir ? 1 : 0;
+      const bWin = b.direction === bestDir ? 1 : 0;
+      if (aWin !== bWin) return bWin - aWin;
+      return (b.magnitude * b.confidence) - (a.magnitude * a.confidence);
+    })
+    .map((s) => ({
+      angle: s.direction === bestDir ? s.label : `[OPPOSING] ${s.label}`,
+      weight: Math.round(s.magnitude * s.confidence * 10),
+      strength: s.strength,
+    }));
+
+  return {
+    score,
+    direction: bestDir as "home" | "away" | "over" | "under",
+    reasons,
+  };
+}
+
+// ─── Headline Generation (v3) ────────────────────────────────────────────────
+
+function buildHeadlineV3(
+  teamName: string,
+  spreadVal: number,
+  score: number,
+  signals: SignalResult[],
+  direction: string,
+): string {
+  const confidence = score >= 85 ? 5 : score >= 70 ? 4 : 3;
+  const spreadLabel = `${spreadVal > 0 ? "+" : ""}${spreadVal}`;
+
+  const modelEdge = signals.find((s) => s.category === "modelEdge" && s.direction === direction);
+  const agreeingSignals = signals.filter((s) => s.direction === direction && s.strength !== "noise");
+
+  if (confidence >= 5) {
+    if (modelEdge && modelEdge.magnitude >= 5) {
+      const edgeMatch = modelEdge.label.match(/edge ([+-]?\d+\.?\d*)/);
+      const edgeVal = edgeMatch ? edgeMatch[1] : "";
+      return `${agreeingSignals.length} signals align — model sees ${edgeVal} pts of value on ${teamName}`;
+    }
+    return `Strong convergence: ${agreeingSignals.length} independent edges favor ${teamName} ${spreadLabel}`;
+  }
+
+  if (confidence >= 4) {
+    if (modelEdge && modelEdge.magnitude >= 3) {
+      const edgeMatch = modelEdge.label.match(/edge ([+-]?\d+\.?\d*)/);
+      const edgeVal = edgeMatch ? edgeMatch[1] : "";
+      return `Model edge: ${teamName} has ${edgeVal} pts of line value`;
+    }
+    if (agreeingSignals.length >= 3) {
+      return `${agreeingSignals.length} trend angles favor ${teamName} ${spreadLabel}`;
+    }
+    return `ATS advantage backs ${teamName} ${spreadLabel}`;
+  }
+
+  // 3★
+  if (agreeingSignals.length >= 2) {
+    return `${agreeingSignals.length} factors lean ${teamName} ${spreadLabel}`;
+  }
+  return `Slight lean: ${teamName} ${spreadLabel}`;
+}
+
+function buildOUHeadlineV3(
+  side: string,
+  lineVal: number,
+  score: number,
+  signals: SignalResult[],
+  direction: string,
+): string {
+  const confidence = score >= 85 ? 5 : score >= 70 ? 4 : 3;
+
+  const modelEdge = signals.find((s) => s.category === "modelEdge" && s.direction === direction);
+  const weatherSignal = signals.find((s) => s.category === "h2hWeather" && s.direction === direction);
+  const agreeingSignals = signals.filter((s) => s.direction === direction && s.strength !== "noise");
+
+  if (confidence >= 5 && modelEdge && modelEdge.magnitude >= 4) {
+    const totalMatch = modelEdge.label.match(/predicted (\d+\.?\d*)/);
+    const totalVal = totalMatch ? totalMatch[1] : "";
+    const edgeMatch = modelEdge.label.match(/\(([+-]\d+\.?\d*)\)/);
+    const edgeVal = edgeMatch ? edgeMatch[1] : "";
+    return `Model projects ${totalVal} total — ${edgeVal} pts from the ${side.toLowerCase()} (${lineVal})`;
+  }
+
+  if (confidence >= 4) {
+    if (weatherSignal && weatherSignal.magnitude >= 3) {
+      const windMatch = weatherSignal.label.match(/(\d+) mph/);
+      const windVal = windMatch ? `${windMatch[1]} mph wind + ` : "";
+      return `${windVal}trend data favor ${side} ${lineVal}`;
+    }
+    return `${agreeingSignals.length} signals favor ${side} ${lineVal}`;
+  }
+
+  return `Lean: ${side} ${lineVal}`;
 }
 
 // ─── Prop Auto-Discovery (v2 — splits + opponent) ───────────────────────────
@@ -874,7 +1307,6 @@ async function discoverProps(
 
       for (const stat of statKeys) {
         try {
-          // Get season average + median for prop line
           const playerGames = await prisma.playerGameLog.findMany({
             where: { playerId: player.playerId, season: currentSeason },
             select: { stats: true },
@@ -893,13 +1325,11 @@ async function discoverProps(
           const median = sorted.length % 2 === 0
             ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
             : sorted[Math.floor(sorted.length / 2)];
-          // Use median for line (more robust to outliers), rounded to 0.5
           const propLine = Math.round(median * 2) / 2;
           if (propLine <= 0) continue;
 
           const opponent = isHome ? awayTeam : homeTeam;
 
-          // Run full prop analysis with home/away context
           const result = await executePlayerPropQueryFromDB({
             player: player.playerName,
             stat,
@@ -917,21 +1347,17 @@ async function discoverProps(
             continue;
           }
 
-          // Score using Wilson lower bound as the base
           const [wilsonLower] = wilsonInterval(result.overall.hits, result.overall.total);
           let score = 50;
 
-          // Core: Wilson-adjusted hit rate contribution
           const wilsonEdge = wilsonLower - 0.5;
           if (wilsonEdge > 0) {
-            score += Math.round(wilsonEdge * 80); // 0.10 edge → +8
+            score += Math.round(wilsonEdge * 80);
           }
 
-          // Significance bonus
           score += result.overall.significance.strength === "strong" ? 12
             : result.overall.significance.strength === "moderate" ? 8 : 3;
 
-          // Splits bonus: check if the relevant split (home/away) is strong
           const relevantSplit = result.splits.find(
             (s) => s.label === (isHome ? "Home" : "Away"),
           );
@@ -943,15 +1369,12 @@ async function discoverProps(
             }
           }
 
-          // Median vs line: if median well above line, stronger signal
           if (median > propLine * 1.10) score += 5;
           else if (median > propLine * 1.05) score += 3;
 
-          // Recent bonus
           if (result.recentTrend.last5.total >= 4 && result.recentTrend.last5.hitRate >= 80) score += 8;
           else if (result.recentTrend.last5.total >= 4 && result.recentTrend.last5.hitRate >= 60) score += 4;
 
-          // Streak bonus
           if (result.currentStreak >= 4) score += 5;
           else if (result.currentStreak >= 2) score += 2;
 
@@ -961,7 +1384,6 @@ async function discoverProps(
 
           const label = PROP_LABELS[stat] || stat.replace(/_/g, " ");
 
-          // Build reasoning with splits data
           const reasoning: ReasoningEntry[] = [
             {
               angle: `Overall: ${result.overall.hits}/${result.overall.total} (${result.overall.hitRate}%, floor ${(wilsonLower * 100).toFixed(0)}%)`,
@@ -971,7 +1393,6 @@ async function discoverProps(
             },
           ];
 
-          // Add relevant split
           if (relevantSplit && relevantSplit.total >= 3) {
             reasoning.push({
               angle: `${relevantSplit.label}: ${relevantSplit.hits}/${relevantSplit.total} (${relevantSplit.hitRate}%)`,
@@ -981,7 +1402,6 @@ async function discoverProps(
             });
           }
 
-          // Add fav/dog split if meaningful
           const favDogSplit = result.splits.find(
             (s) => s.label === "As Favorite" || s.label === "As Underdog",
           );
@@ -1032,49 +1452,6 @@ async function discoverProps(
   return picks.sort((a, b) => b.trendScore - a.trendScore).slice(0, 5);
 }
 
-// ─── Headline Generation ────────────────────────────────────────────────────
-
-function buildHeadline(
-  teamName: string,
-  spreadVal: number,
-  reasons: ReasoningEntry[],
-): string {
-  // Lead with strongest angle
-  const top = reasons[0];
-  if (top && top.strength === "strong" && top.record) {
-    return `${top.record} — ${top.angle.split(":")[0]}`;
-  }
-
-  const strongCount = reasons.filter((r) => r.strength === "strong").length;
-  const modCount = reasons.filter((r) => r.strength === "moderate").length;
-
-  if (strongCount >= 2) {
-    return `${strongCount} strong signals favor ${teamName} ${spreadVal > 0 ? "+" : ""}${spreadVal}`;
-  }
-  if (strongCount >= 1 && modCount >= 1) {
-    return `${strongCount + modCount} converging trends on ${teamName} ${spreadVal > 0 ? "+" : ""}${spreadVal}`;
-  }
-  return `${reasons.length} trend${reasons.length !== 1 ? "s" : ""} favor ${teamName} ${spreadVal > 0 ? "+" : ""}${spreadVal}`;
-}
-
-function buildOUHeadline(
-  side: string,
-  lineVal: number,
-  reasons: ReasoningEntry[],
-): string {
-  const top = reasons[0];
-  if (top && top.strength === "strong") {
-    const prefix = top.angle.split(":")[0];
-    return `${prefix} — ${side} ${lineVal}`;
-  }
-
-  const strongCount = reasons.filter((r) => r.strength === "strong" || r.strength === "moderate").length;
-  if (strongCount >= 2) {
-    return `${strongCount} signals favor the ${side.toLowerCase()} (${lineVal})`;
-  }
-  return `${reasons.length} trend${reasons.length !== 1 ? "s" : ""} favor the ${side.toLowerCase()}`;
-}
-
 // ─── Main: Generate Daily Picks ──────────────────────────────────────────────
 
 export async function generateDailyPicks(
@@ -1096,6 +1473,8 @@ export async function generateDailyPicks(
 
   const allGames = await loadGamesBySportCached(sport);
   const currentSeason = getCurrentSeason(sport, dateStart);
+  const sportWeightsSpread = SPREAD_WEIGHTS[sport] || SPREAD_WEIGHTS.NFL;
+  const sportWeightsOU = OU_WEIGHTS[sport] || OU_WEIGHTS.NFL;
 
   const allPicks: GeneratedPick[] = [];
   const batchSize = 4;
@@ -1124,24 +1503,31 @@ export async function generateDailyPicks(
             discoverTeamAngles(sport, canonAway, "away", currentSeason),
           ]);
 
-          // KenPom analysis for NCAAMB
-          const kenpomSignals = analyzeKenPom(allGames, canonHome, canonAway, sport, currentSeason);
+          // Compute model edge (KenPom for NCAAMB, power rating for NFL/NCAAF)
+          const modelPrediction = sport === "NCAAMB"
+            ? computeKenPomEdge(allGames, canonHome, canonAway, sport, currentSeason, game.spread, game.overUnder)
+            : computePowerRatingEdge(allGames, canonHome, canonAway, sport, currentSeason, game.spread, game.overUnder);
 
-          // Score spread
+          // ── Score Spread ──
           if (game.spread !== null) {
-            const spreadScore = scoreSpread(
-              homeStats, awayStats, h2h,
-              homeDiscovery.ats, awayDiscovery.ats,
-              kenpomSignals,
-            );
-            const bestSide = spreadScore.home >= spreadScore.away ? "home" : "away";
-            const bestScore = Math.max(spreadScore.home, spreadScore.away);
-            const confidence = bestScore >= 85 ? 5 : bestScore >= 70 ? 4 : bestScore >= 55 ? 3 : 0;
+            const spreadSignals: SignalResult[] = [
+              modelPrediction.spread,
+              signalSeasonATS(homeStats, awayStats),
+              signalTrendAnglesSpread(homeDiscovery.ats, awayDiscovery.ats),
+              signalRecentForm(homeStats, awayStats),
+              signalH2HSpread(h2h),
+              signalSituational(
+                game.forecastWindMph, game.forecastTemp,
+                game.forecastCategory, sport,
+              ),
+            ];
+
+            const result = computeConvergenceScore(spreadSignals, sportWeightsSpread);
+            const confidence = result.score >= 85 ? 5 : result.score >= 70 ? 4 : result.score >= 55 ? 3 : 0;
 
             if (confidence > 0) {
-              const reasons = bestSide === "home" ? spreadScore.homeReasons : spreadScore.awayReasons;
-              const teamName = bestSide === "home" ? canonHome : canonAway;
-              const spreadVal = bestSide === "home" ? game.spread : -(game.spread);
+              const teamName = result.direction === "home" ? canonHome : canonAway;
+              const spreadVal = result.direction === "home" ? game.spread : -(game.spread);
 
               picks.push({
                 sport,
@@ -1149,34 +1535,39 @@ export async function generateDailyPicks(
                 homeTeam: game.homeTeam,
                 awayTeam: game.awayTeam,
                 gameDate: game.gameDate,
-                pickSide: bestSide,
+                pickSide: result.direction,
                 line: game.spread,
                 pickLabel: `${teamName} ${spreadVal > 0 ? "+" : ""}${spreadVal}`,
                 playerName: null,
                 propStat: null,
                 propLine: null,
-                trendScore: bestScore,
+                trendScore: result.score,
                 confidence,
-                headline: buildHeadline(teamName, spreadVal, reasons),
-                reasoning: reasons,
+                headline: buildHeadlineV3(teamName, spreadVal, result.score, spreadSignals, result.direction),
+                reasoning: result.reasons,
               });
             }
           }
 
-          // Score O/U
+          // ── Score O/U ──
           if (game.overUnder !== null) {
-            const ouScore = scoreOverUnder(
-              homeStats, awayStats, h2h, game.overUnder,
-              homeDiscovery.ou, awayDiscovery.ou,
-              kenpomSignals,
-            );
-            const bestSide = ouScore.over >= ouScore.under ? "over" : "under";
-            const bestScore = Math.max(ouScore.over, ouScore.under);
-            const confidence = bestScore >= 85 ? 5 : bestScore >= 70 ? 4 : bestScore >= 55 ? 3 : 0;
+            const ouSignals: SignalResult[] = [
+              modelPrediction.ou,
+              signalSeasonOU(homeStats, awayStats),
+              signalTrendAnglesOU(homeDiscovery.ou, awayDiscovery.ou),
+              signalRecentFormOU(homeStats, awayStats),
+              signalH2HWeatherOU(
+                h2h, game.overUnder,
+                game.forecastWindMph, game.forecastTemp,
+                game.forecastCategory, sport,
+              ),
+            ];
+
+            const result = computeConvergenceScore(ouSignals, sportWeightsOU);
+            const confidence = result.score >= 85 ? 5 : result.score >= 70 ? 4 : result.score >= 55 ? 3 : 0;
 
             if (confidence > 0) {
-              const reasons = bestSide === "over" ? ouScore.overReasons : ouScore.underReasons;
-              const label = bestSide === "over" ? "Over" : "Under";
+              const label = result.direction === "over" ? "Over" : "Under";
 
               picks.push({
                 sport,
@@ -1184,16 +1575,16 @@ export async function generateDailyPicks(
                 homeTeam: game.homeTeam,
                 awayTeam: game.awayTeam,
                 gameDate: game.gameDate,
-                pickSide: bestSide,
+                pickSide: result.direction,
                 line: game.overUnder,
                 pickLabel: `${label} ${game.overUnder}`,
                 playerName: null,
                 propStat: null,
                 propLine: null,
-                trendScore: bestScore,
+                trendScore: result.score,
                 confidence,
-                headline: buildOUHeadline(label, game.overUnder, reasons),
-                reasoning: reasons,
+                headline: buildOUHeadlineV3(label, game.overUnder, result.score, ouSignals, result.direction),
+                reasoning: result.reasons,
               });
             }
           }
