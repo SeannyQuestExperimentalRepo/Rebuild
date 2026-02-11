@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ConfidenceStars } from "./confidence-stars";
 import { SignificanceBadge } from "@/components/trends/significance-badge";
+import { TrackBetButton } from "./track-bet-button";
 
 interface ReasoningEntry {
   angle: string;
@@ -13,6 +14,7 @@ interface ReasoningEntry {
 
 interface Pick {
   id: number;
+  sport: string;
   pickType: string;
   homeTeam: string;
   awayTeam: string;
@@ -85,6 +87,21 @@ function PickBox({ pick }: { pick: Pick }) {
               <span className="text-muted-foreground">{r.angle}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {pick.result === "PENDING" && (
+        <div className="mt-2">
+          <TrackBetButton
+            sport={pick.sport}
+            betType={pick.pickType === "OVER_UNDER" ? "OVER_UNDER" : "SPREAD"}
+            homeTeam={pick.homeTeam}
+            awayTeam={pick.awayTeam}
+            gameDate={pick.gameDate}
+            pickSide={pick.pickSide}
+            line={pick.line}
+            dailyPickId={pick.id}
+          />
         </div>
       )}
     </div>

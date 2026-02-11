@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ConfidenceStars } from "./confidence-stars";
 import { SignificanceBadge } from "@/components/trends/significance-badge";
+import { TrackBetButton } from "./track-bet-button";
 
 interface ReasoningEntry {
   angle: string;
@@ -13,6 +14,7 @@ interface ReasoningEntry {
 
 interface PropPick {
   id: number;
+  sport: string;
   homeTeam: string;
   awayTeam: string;
   gameDate: string;
@@ -103,6 +105,24 @@ export function PropPickCard({ pick }: PropPickCardProps) {
               <span className="text-muted-foreground">{r.angle}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {pick.result === "PENDING" && (
+        <div className="mt-2">
+          <TrackBetButton
+            sport={pick.sport}
+            betType="PLAYER_PROP"
+            homeTeam={pick.homeTeam}
+            awayTeam={pick.awayTeam}
+            gameDate={pick.gameDate}
+            pickSide={pick.pickLabel}
+            line={pick.propLine}
+            dailyPickId={pick.id}
+            playerName={pick.playerName}
+            propStat={pick.propStat}
+            propLine={pick.propLine}
+          />
         </div>
       )}
     </div>
