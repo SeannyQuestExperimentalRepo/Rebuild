@@ -15,6 +15,7 @@ import { SpreadResult, OUResult } from "@prisma/client";
 import {
   fetchUpcomingWithOdds,
   fetchScoreboard,
+  fetchAPRankings,
   mapTeamToCanonical,
   type Sport,
 } from "./espn-api";
@@ -35,6 +36,9 @@ export interface RefreshResult {
 export async function refreshUpcomingGames(sport: Sport): Promise<RefreshResult> {
   const games = await fetchUpcomingWithOdds(sport);
 
+  // Fetch AP Top 25 rankings (NCAAMB/NCAAF only; empty map for NFL)
+  const apRankings = await fetchAPRankings(sport);
+
   let upserted = 0;
   for (const g of games) {
     // Only store games with at least one useful odds field
@@ -44,6 +48,18 @@ export async function refreshUpcomingGames(sport: Sport): Promise<RefreshResult>
     const homeTeam = g.homeCanonical ?? g.homeTeam.displayName;
     const awayTeam = g.awayCanonical ?? g.awayTeam.displayName;
     const gameDate = new Date(g.date);
+
+    // Look up AP rankings — prefer ESPN team ID (reliable), fall back to name matching
+    const homeRank = apRankings.get(`espn:${g.homeTeam.espnId}`)
+      ?? apRankings.get(g.homeTeam.displayName)
+      ?? apRankings.get(homeTeam)
+      ?? g.homeTeam.rank
+      ?? null;
+    const awayRank = apRankings.get(`espn:${g.awayTeam.espnId}`)
+      ?? apRankings.get(g.awayTeam.displayName)
+      ?? apRankings.get(awayTeam)
+      ?? g.awayTeam.rank
+      ?? null;
 
     try {
       await prisma.upcomingGame.upsert({
@@ -60,16 +76,16 @@ export async function refreshUpcomingGames(sport: Sport): Promise<RefreshResult>
           gameDate,
           homeTeam,
           awayTeam,
-          homeRank: g.homeTeam.rank,
-          awayRank: g.awayTeam.rank,
+          homeRank,
+          awayRank,
           spread: g.odds.spread,
           overUnder: g.odds.overUnder,
           moneylineHome: g.odds.moneylineHome,
           moneylineAway: g.odds.moneylineAway,
         },
         update: {
-          homeRank: g.homeTeam.rank,
-          awayRank: g.awayTeam.rank,
+          homeRank,
+          awayRank,
           spread: g.odds.spread,
           overUnder: g.odds.overUnder,
           moneylineHome: g.odds.moneylineHome,

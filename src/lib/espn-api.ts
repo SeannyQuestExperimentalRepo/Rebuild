@@ -506,3 +506,59 @@ export function mapTeamToCanonical(
   );
   return null;
 }
+
+// ─── AP Rankings ────────────────────────────────────────────────────────────
+
+const RANKINGS_URLS: Record<string, string> = {
+  NCAAMB: "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/rankings",
+  NCAAF: "https://site.api.espn.com/apis/site/v2/sports/football/college-football/rankings",
+};
+
+/**
+ * Fetch AP Top 25 rankings from ESPN.
+ * Returns a Map of team displayName → rank (1-25).
+ * Works for NCAAMB and NCAAF. Returns empty map for NFL.
+ */
+export async function fetchAPRankings(sport: Sport): Promise<Map<string, number>> {
+  const rankMap = new Map<string, number>();
+  const url = RANKINGS_URLS[sport];
+  if (!url) return rankMap;
+
+  try {
+    const data = await fetchJSON<{
+      rankings?: Array<{
+        name: string;
+        ranks?: Array<{
+          current: number;
+          team: { nickname: string; displayName?: string; location?: string; id: string };
+        }>;
+      }>;
+    }>(url);
+
+    // Find the AP poll (first ranking, usually "AP Top 25")
+    const apPoll = data.rankings?.[0];
+    if (!apPoll?.ranks) return rankMap;
+
+    for (const entry of apPoll.ranks) {
+      // Store by ESPN team ID (most reliable for matching with odds endpoint)
+      rankMap.set(`espn:${entry.team.id}`, entry.current);
+      // Store by multiple name variants for fallback matching
+      const teamName = entry.team.location
+        ? `${entry.team.location} ${entry.team.nickname}`
+        : entry.team.nickname;
+      rankMap.set(teamName, entry.current);
+      if (entry.team.displayName) {
+        rankMap.set(entry.team.displayName, entry.current);
+      }
+      if (entry.team.location) {
+        rankMap.set(entry.team.location, entry.current);
+      }
+    }
+
+    console.log(`[ESPN] Fetched AP Top 25 for ${sport}`);
+  } catch (err) {
+    console.error(`[ESPN] Rankings fetch failed for ${sport}:`, err);
+  }
+
+  return rankMap;
+}
