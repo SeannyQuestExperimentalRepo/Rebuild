@@ -304,6 +304,26 @@ model OddsSnapshot {
   @@index([homeTeam, awayTeam, gameDate])
 }
 
+// ─── SAVED TRENDS ───────────────────────────────────────────────────────────
+
+model SavedTrend {
+  id              Int      @id @default(autoincrement())
+  userId          String
+  name            String   // User-assigned name ("Chiefs ATS home favorites")
+  sport           Sport
+  query           Json     // Full TrendQuery object for replay
+  description     String?  // Auto-generated summary
+  lastResult      Json?    // Latest trigger result snapshot
+  lastTriggered   DateTime?
+  notifyEmail     Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([sport])
+}
+
 // ─── AUTH (NextAuth.js v5) ──────────────────────────────────────────────────
 
 model User {
@@ -322,6 +342,7 @@ model User {
   sessions           Session[]
   searches           SearchLog[]
   bets               Bet[]
+  savedTrends        SavedTrend[]
 }
 
 model Account {
