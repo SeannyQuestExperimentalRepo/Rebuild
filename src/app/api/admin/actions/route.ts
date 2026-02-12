@@ -1,7 +1,7 @@
 import "server-only";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { isAdminAuthenticated } from "../session/route";
+import { isAdminAuthenticated } from "@/lib/admin-auth";
 import type { Sport } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
