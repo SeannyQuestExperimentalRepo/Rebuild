@@ -1,5 +1,5 @@
 /**
- * Daily Pick Engine v6
+ * Daily Pick Engine v7
  *
  * Signal Convergence Scoring Model — generates daily betting picks by
  * evaluating 9 independent signal categories:
@@ -14,12 +14,17 @@
  *   8. Tempo Differential — pace mismatch O/U signal (NCAAMB)
  *   9. Market Edge — KenPom WP vs moneyline implied probability (NCAAMB)
  *
+ * v7 changes:
+ *   - O/U model replaced: sumAdjDE thresholds (51.2%) → OLS regression (69.3%)
+ *   - Regression uses AdjDE_sum + AdjOE_sum + AdjTempo_avg + FM_total + conference
+ *   - Edge = predictedTotal - overUnder → continuous signal (not thresholds)
+ *   - Removed redundant AdjOE, FanMatch, tempo×DE modifiers (baked into regression)
+ *   - Kept contextual overrides: top-50, power conf, 200+, March, line range
+ *
  * v6 changes:
  *   - FanMatch predicted margin replaces AdjEM+HCA for spread model edge
  *   - Context-aware HCA fallback (conf=2.5, non-conf=1.5, Nov=1.0, March=0.5)
- *   - FanMatch predicted total as confirming/disconfirming O/U modifier
  *   - New moneyline market edge signal (KenPom WP vs market implied probability)
- *   - AdjOE modifier for O/U (offensive efficiency was previously ignored)
  *
  * v5 changes (41-experiment backtest on 5,523 NCAAMB games):
  *   - Flipped ATS to contrarian/fade for NCAAMB (55.4% spread W%, +6% ROI)
@@ -111,7 +116,7 @@ const SPREAD_WEIGHTS: Record<string, Record<string, number>> = {
 
 const OU_WEIGHTS: Record<string, Record<string, number>> = {
   NCAAMB: {
-    modelEdge: 0.35, // sum_AdjDE is strongest O/U predictor (r=0.345, LOSO 65.1%)
+    modelEdge: 0.35, // v7: OLS regression predicted total (69.3% accuracy, +32% ROI)
     seasonOU: 0.12,
     trendAngles: 0.18,
     recentForm: 0.08,
@@ -351,13 +356,11 @@ function buildH2H(
 //   - Away side (edge < 0): stable year-round (57-58%).
 //   - March top-25 home: 43.8% cover (regression/fatigue → fade).
 //
-// O/U: sum_AdjDE = home_AdjDE + away_AdjDE (r=0.345, LOSO 65.1%)
-//   - Higher AdjDE = worse defense = more points = OVER.
-//   - Thresholds: >210 → 67% OVER, >205 → 63%, <190 → 81% UNDER, <185 → 86%.
-//   - Both top-50: 22% OVER (78% UNDER) — overrides DE signal.
-//   - Both power conf (BE/B12/B10/SEC/ACC/P12): 70% UNDER.
-//   - Both 200+: 69% OVER.
-//   - Amplifiers: tempo×DE interaction, March UNDER, high line >155.
+// O/U: Regression-predicted total (v7, 69.3% accuracy, +32% ROI on test set)
+//   - OLS on AdjDE_sum + AdjOE_sum + AdjTempo_avg + FM_total + conference
+//   - Replaces v4 sumAdjDE thresholds (51.2%) with continuous prediction
+//   - Contextual overrides: top-50 (78% UNDER), power conf (70% UNDER),
+//     200+ (69% OVER), March UNDER, line range bias
 
 function computeKenPomEdge(
   ratings: Map<string, KenpomRating> | null,
@@ -456,91 +459,72 @@ function computeKenPomEdge(
     };
   }
 
-  // ── O/U: sum_AdjDE efficiency-based model ──
-  // sum_AdjDE (r=0.345) replaces predicted-total approach (r=0.003).
-  // Higher AdjDE = worse defense = more points expected = OVER.
-  // Thresholds validated via LOSO CV across 16 seasons (65.1% accuracy).
+  // ── O/U: Regression-predicted total (v7) ──
+  // OLS regression on 3,456 NCAAMB games (walk-forward validated, 69.3% O/U accuracy).
+  // Replaced v4 sumAdjDE thresholds (51.2%) with continuous prediction from
+  // AdjDE_sum + AdjOE_sum + AdjTempo_avg + FanMatch total + conference flag.
+  // Model A (stats only, no market line) coefficients from scripts/regression-model.ts.
   let ouSignal: SignalResult = { ...neutral };
   if (overUnder !== null) {
     const sumAdjDE = homeDE + awayDE;
+    const sumAdjOE = homeRating.AdjOE + awayRating.AdjOE;
     const avgTempo = (homeTempo + awayTempo) / 2;
+    const tempoDiff = Math.abs(homeTempo - awayTempo);
+    const emAbsDiff = Math.abs(homeEM - awayEM);
+    const isConf = homeRating.ConfShort === awayRating.ConfShort ? 1 : 0;
+    const fmTotal = fm ? fm.HomePred + fm.VisitorPred : 0;
+
+    // Regression Model A coefficients (stats only, walk-forward on 2025 season)
+    const predictedTotal =
+      -418.2117 +
+      0.6390 * sumAdjDE +
+      0.6115 * sumAdjOE +
+      4.3646 * avgTempo +
+      -0.0177 * tempoDiff +
+      -0.0078 * emAbsDiff +
+      -1.4343 * isConf +
+      0.0203 * fmTotal;
+
+    const edge = predictedTotal - overUnder;
     let ouDir: "over" | "under" | "neutral" = "neutral";
     let ouMag = 0;
     let ouConf = 0;
     const labelParts: string[] = [];
 
-    // Primary signal: sum_AdjDE thresholds (v4 — recalibrated from 5,523 game backtest)
-    // Key fix: 200-215 range was incorrectly classified as OVER in v3.
-    // Backtest showed: >215 = 60.8% OVER, 210-215 = 46.9% OVER, 200-210 = 30-35% OVER.
-    if (sumAdjDE > 215) {
-      ouDir = "over"; ouMag = 8; ouConf = 0.85;
-      labelParts.push(`sum_AdjDE=${sumAdjDE.toFixed(1)} (strong OVER, 61% hist.)`);
-    } else if (sumAdjDE > 210) {
-      // 210-215: 46.9% over — essentially a coin flip, neutral
-      labelParts.push(`sum_AdjDE=${sumAdjDE.toFixed(1)} (neutral 210-215)`);
-    } else if (sumAdjDE > 205) {
-      ouDir = "under"; ouMag = 5; ouConf = 0.80;
-      labelParts.push(`sum_AdjDE=${sumAdjDE.toFixed(1)} (UNDER zone, 65% hist.)`);
-    } else if (sumAdjDE > 200) {
-      ouDir = "under"; ouMag = 6; ouConf = 0.85;
-      labelParts.push(`sum_AdjDE=${sumAdjDE.toFixed(1)} (strong UNDER, 70% hist.)`);
-    } else if (sumAdjDE > 195) {
-      ouDir = "under"; ouMag = 8; ouConf = 0.90;
-      labelParts.push(`sum_AdjDE=${sumAdjDE.toFixed(1)} (strong UNDER, 75% hist.)`);
-    } else if (sumAdjDE > 190) {
-      ouDir = "under"; ouMag = 8; ouConf = 0.92;
-      labelParts.push(`sum_AdjDE=${sumAdjDE.toFixed(1)} (strong UNDER, 74% hist.)`);
-    } else if (sumAdjDE > 185) {
-      ouDir = "under"; ouMag = 9; ouConf = 0.93;
-      labelParts.push(`sum_AdjDE=${sumAdjDE.toFixed(1)} (elite UNDER, 80% hist.)`);
+    // Edge-to-magnitude mapping based on regression confidence buckets:
+    // |edge| >= 5: 76.5% accuracy (high conf), |edge| 2-5: 59.4% (medium)
+    const absEdge = Math.abs(edge);
+    if (absEdge >= 10) {
+      ouDir = edge > 0 ? "over" : "under";
+      ouMag = 10; ouConf = 0.93;
+    } else if (absEdge >= 7) {
+      ouDir = edge > 0 ? "over" : "under";
+      ouMag = 9; ouConf = 0.90;
+    } else if (absEdge >= 5) {
+      ouDir = edge > 0 ? "over" : "under";
+      ouMag = 8; ouConf = 0.85;
+    } else if (absEdge >= 3) {
+      ouDir = edge > 0 ? "over" : "under";
+      ouMag = 6; ouConf = 0.75;
+    } else if (absEdge >= 2) {
+      ouDir = edge > 0 ? "over" : "under";
+      ouMag = 5; ouConf = 0.65;
+    } else if (absEdge >= 1) {
+      ouDir = edge > 0 ? "over" : "under";
+      ouMag = 3; ouConf = 0.55;
     } else {
-      ouDir = "under"; ouMag = 10; ouConf = 0.95;
-      labelParts.push(`sum_AdjDE=${sumAdjDE.toFixed(1)} (elite UNDER, 92% hist.)`);
+      // |edge| < 1: too close to call
+      labelParts.push(`regression pred=${predictedTotal.toFixed(1)} (edge ${edge > 0 ? "+" : ""}${edge.toFixed(1)}, neutral)`);
     }
 
-    // v6: AdjOE modifier — offensive efficiency is the missing half of the equation
-    const sumAdjOE = homeRating.AdjOE + awayRating.AdjOE;
-    if (sumAdjOE > 220 && ouDir === "over") {
-      ouMag = Math.min(ouMag + 1, 10);
-      labelParts.push(`strong offenses sum_AdjOE=${sumAdjOE.toFixed(1)}`);
-    } else if (sumAdjOE < 195 && ouDir === "under") {
-      ouMag = Math.min(ouMag + 1, 10);
-      labelParts.push(`weak offenses sum_AdjOE=${sumAdjOE.toFixed(1)}`);
+    if (ouDir !== "neutral") {
+      labelParts.push(`regression pred=${predictedTotal.toFixed(1)} vs line ${overUnder} (edge ${edge > 0 ? "+" : ""}${edge.toFixed(1)})`);
+      labelParts.push(`DE_sum=${sumAdjDE.toFixed(0)} OE_sum=${sumAdjOE.toFixed(0)} tempo=${avgTempo.toFixed(1)}`);
     }
 
-    // v6: FanMatch predicted total modifier
-    if (fm && overUnder !== null && ouDir !== "neutral") {
-      const fmPredTotal = fm.HomePred + fm.VisitorPred;
-      const fmDirection: "over" | "under" = fmPredTotal > overUnder ? "over" : "under";
-      if (fmDirection === ouDir) {
-        // FanMatch agrees with sum_AdjDE → boost
-        ouMag = Math.min(ouMag + 1, 10);
-        ouConf = Math.min(ouConf + 0.05, 1.0);
-        labelParts.push(`FM total ${fmPredTotal.toFixed(1)} confirms (vs line ${overUnder})`);
-      } else {
-        // FanMatch disagrees → dampen
-        ouMag = Math.max(ouMag - 1, 0);
-        ouConf = Math.max(ouConf - 0.05, 0);
-        labelParts.push(`FM total ${fmPredTotal.toFixed(1)} opposes (vs line ${overUnder})`);
-      }
-    }
-
-    // Tempo x DE interaction amplifier
-    if (ouDir === "over" && avgTempo > 70 && sumAdjDE > 215) {
-      ouMag = Math.min(ouMag + 2, 10);
-      ouConf = Math.min(ouConf + 0.05, 1.0);
-      labelParts.push(`fast tempo ${avgTempo.toFixed(1)} amplifies OVER`);
-    } else if (ouDir === "over" && avgTempo > 68 && sumAdjDE > 215) {
-      ouMag = Math.min(ouMag + 1, 10);
-      labelParts.push(`tempo ${avgTempo.toFixed(1)} supports OVER`);
-    } else if (ouDir === "under" && avgTempo < 64 && sumAdjDE < 205) {
-      ouMag = Math.min(ouMag + 2, 10);
-      ouConf = Math.min(ouConf + 0.05, 1.0);
-      labelParts.push(`slow tempo ${avgTempo.toFixed(1)} amplifies UNDER`);
-    }
+    // ── Contextual modifiers (backtest validated, not captured in regression) ──
 
     // Both top-50 matchup: 22.2% OVER (77.8% UNDER!) — stable 18-34% every season
-    // This is the strongest UNDER signal discovered — overrides even sum_AdjDE
     if (homeRating.RankAdjEM <= 50 && awayRating.RankAdjEM <= 50) {
       ouDir = "under";
       ouMag = 10;
@@ -548,13 +532,12 @@ function computeKenPomEdge(
       labelParts.push(`BOTH TOP-50 (#${homeRating.RankAdjEM} vs #${awayRating.RankAdjEM}, 78% UNDER hist.)`);
     }
 
-    // Both power conference: 70.3% UNDER (+0.0066 LOSO improvement)
+    // Both power conference: 70.3% UNDER
     const powerConfs = ["BE", "B12", "B10", "SEC", "ACC", "P12"];
     const homeIsPower = powerConfs.includes(homeRating.ConfShort ?? "");
     const awayIsPower = powerConfs.includes(awayRating.ConfShort ?? "");
     if (homeIsPower && awayIsPower &&
         !(homeRating.RankAdjEM <= 50 && awayRating.RankAdjEM <= 50)) {
-      // Don't double-count with top-50 modifier
       if (ouDir === "under") {
         ouMag = Math.min(ouMag + 2, 10);
         labelParts.push("both power conf (70% UNDER)");
