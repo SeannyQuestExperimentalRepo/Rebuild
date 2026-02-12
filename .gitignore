@@ -45,6 +45,13 @@ data/
 # performance benchmark logs
 perf-results/
 
+# ML training data (generated from DB, not source)
+scripts/training-data.csv
+
+# Playwright
+/test-results/
+/playwright-report/
+
 # AI prompts / internal docs
 PROMPT.md
 RALPH_LOG.md
