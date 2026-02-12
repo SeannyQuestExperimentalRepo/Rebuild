@@ -109,9 +109,10 @@ export async function GET(req: NextRequest) {
       count: snapshots.length,
     });
   } catch (err) {
-    console.error("[GET /api/odds]", err);
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("[GET /api/odds]", message);
     return NextResponse.json(
-      { success: false, error: "Failed to fetch odds" },
+      { success: false, error: message },
       { status: 500 },
     );
   }
