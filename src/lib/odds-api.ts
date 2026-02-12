@@ -103,7 +103,7 @@ export async function fetchLiveOdds(sport: string): Promise<OddsGame[]> {
 
   const res = await fetch(url, {
     headers: { Accept: "application/json" },
-    next: { revalidate: 300 }, // Cache for 5 minutes
+    cache: "no-store", // We cache in DB; avoid Next.js caching stale/error responses
   });
 
   if (!res.ok) {
