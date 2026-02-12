@@ -311,8 +311,39 @@ export async function POST(request: NextRequest) {
           return evaluateSavedTrends();
         },
       );
-      results.trend_eval = trendResult;
+      results.trend_eval = {
+        evaluated: trendResult.evaluated,
+        triggered: trendResult.triggered,
+        errors: trendResult.errors,
+      };
       console.log(`[Cron] Evaluated ${trendResult.evaluated} saved trends, ${trendResult.triggered} triggered`);
+
+      // 6.5. Send email notifications for triggered trends with notifyEmail enabled
+      if (trendResult.triggeredTrends.length > 0) {
+        try {
+          const { sendTrendAlertEmail, isEmailConfigured } = await import("@/lib/email");
+          if (isEmailConfigured()) {
+            const toNotify = trendResult.triggeredTrends.filter((t) => t.notifyEmail);
+            let emailsSent = 0;
+            for (const trend of toNotify) {
+              const sent = await sendTrendAlertEmail(
+                trend.userEmail,
+                trend.trendName,
+                trend.description,
+                trend.matchedGames,
+              );
+              if (sent) emailsSent++;
+            }
+            results.trend_emails = { eligible: toNotify.length, sent: emailsSent };
+            console.log(`[Cron] Sent ${emailsSent}/${toNotify.length} trend alert emails`);
+          } else {
+            results.trend_emails = { skipped: true, reason: "email not configured" };
+          }
+        } catch (emailErr) {
+          console.error("[Cron] Trend email notifications failed:", emailErr);
+          results.trend_emails = { error: "Email send failed" };
+        }
+      }
     } catch (err) {
       Sentry.captureException(err, { tags: { cronStep: "trend_eval" } });
       console.error("[Cron] Trend evaluation failed:", err);

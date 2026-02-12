@@ -69,3 +69,24 @@ export function useDeleteSavedTrend() {
     },
   });
 }
+
+async function updateSavedTrend(input: { id: number; notifyEmail: boolean }): Promise<SavedTrend> {
+  const res = await fetch("/api/trends/saved", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error || "Failed to update trend");
+  return data.trend;
+}
+
+export function useUpdateSavedTrend() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: updateSavedTrend,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["saved-trends"] });
+    },
+  });
+}

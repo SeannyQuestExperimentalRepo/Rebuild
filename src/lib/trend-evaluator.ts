@@ -4,6 +4,8 @@
  * Called from the daily-sync cron. For each saved trend, checks if any
  * upcoming game matches the trend's sport and team filters. If a match
  * is found, marks the trend as triggered with a snapshot of matching games.
+ *
+ * Returns triggered trends with user emails for notification delivery.
  */
 
 import { prisma } from "./db";
@@ -16,7 +18,7 @@ interface TrendQuery {
   [key: string]: unknown;
 }
 
-interface MatchedGame {
+export interface MatchedGame {
   homeTeam: string;
   awayTeam: string;
   gameDate: string;
@@ -24,17 +26,30 @@ interface MatchedGame {
   overUnder: number | null;
 }
 
+export interface TriggeredTrend {
+  trendId: number;
+  trendName: string;
+  description: string | null;
+  userId: string;
+  userEmail: string;
+  notifyEmail: boolean;
+  matchedGames: MatchedGame[];
+}
+
 /**
  * Evaluate all saved trends against today's upcoming games.
- * Returns count of triggered trends.
+ * Returns count of triggered trends and details for notification.
  */
 export async function evaluateSavedTrends(): Promise<{
   evaluated: number;
   triggered: number;
   errors: number;
+  triggeredTrends: TriggeredTrend[];
 }> {
-  const trends = await prisma.savedTrend.findMany();
-  if (trends.length === 0) return { evaluated: 0, triggered: 0, errors: 0 };
+  const trends = await prisma.savedTrend.findMany({
+    include: { user: { select: { email: true } } },
+  });
+  if (trends.length === 0) return { evaluated: 0, triggered: 0, errors: 0, triggeredTrends: [] };
 
   // Get all upcoming games
   const now = new Date();
@@ -48,6 +63,7 @@ export async function evaluateSavedTrends(): Promise<{
   let evaluated = 0;
   let triggered = 0;
   let errors = 0;
+  const triggeredTrends: TriggeredTrend[] = [];
 
   for (const trend of trends) {
     try {
@@ -111,6 +127,15 @@ export async function evaluateSavedTrends(): Promise<{
         });
 
         triggered++;
+        triggeredTrends.push({
+          trendId: trend.id,
+          trendName: trend.name,
+          description: trend.description,
+          userId: trend.userId,
+          userEmail: trend.user.email,
+          notifyEmail: trend.notifyEmail,
+          matchedGames,
+        });
       }
     } catch (err) {
       console.error(`[trend-eval] Failed to evaluate trend ${trend.id}:`, err);
@@ -118,5 +143,5 @@ export async function evaluateSavedTrends(): Promise<{
     }
   }
 
-  return { evaluated, triggered, errors };
+  return { evaluated, triggered, errors, triggeredTrends };
 }

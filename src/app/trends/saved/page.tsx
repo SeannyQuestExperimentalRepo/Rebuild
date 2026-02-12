@@ -4,16 +4,22 @@ import Link from "next/link";
 import {
   useSavedTrends,
   useDeleteSavedTrend,
+  useUpdateSavedTrend,
   type SavedTrend,
 } from "@/hooks/use-saved-trends";
 
 function TrendCard({ trend, onDelete }: { trend: SavedTrend; onDelete: () => void }) {
   const deleteMutation = useDeleteSavedTrend();
+  const updateMutation = useUpdateSavedTrend();
   const isDeleting = deleteMutation.isPending;
 
   const handleDelete = () => {
     if (!confirm(`Delete "${trend.name}"?`)) return;
     deleteMutation.mutate(trend.id, { onSuccess: onDelete });
+  };
+
+  const handleToggleEmail = () => {
+    updateMutation.mutate({ id: trend.id, notifyEmail: !trend.notifyEmail });
   };
 
   return (
@@ -40,6 +46,18 @@ function TrendCard({ trend, onDelete }: { trend: SavedTrend; onDelete: () => voi
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleToggleEmail}
+            disabled={updateMutation.isPending}
+            title={trend.notifyEmail ? "Email alerts on" : "Email alerts off"}
+            className={`rounded-md border px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
+              trend.notifyEmail
+                ? "border-primary/40 bg-primary/10 text-primary hover:bg-primary/20"
+                : "border-border/60 bg-secondary/40 text-muted-foreground hover:bg-secondary"
+            }`}
+          >
+            {trend.notifyEmail ? "Email On" : "Email Off"}
+          </button>
           <Link
             href={`/trends?replay=${trend.id}`}
             className="rounded-md border border-border/60 bg-secondary/40 px-2 py-1 text-xs font-medium transition-colors hover:bg-secondary"

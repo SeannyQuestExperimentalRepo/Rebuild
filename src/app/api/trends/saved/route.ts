@@ -124,6 +124,62 @@ export async function POST(req: NextRequest) {
   }
 }
 
+// ─── PATCH: Update a saved trend (e.g., toggle email notifications) ─────────
+
+export async function PATCH(req: NextRequest) {
+  try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json(
+        { success: false, error: "Authentication required" },
+        { status: 401 },
+      );
+    }
+
+    const limited = applyRateLimit(req, authLimiter, session.user.id);
+    if (limited) return limited;
+
+    const body = (await req.json()) as { id: number; notifyEmail?: boolean };
+
+    if (!body.id) {
+      return NextResponse.json(
+        { success: false, error: "Trend id is required" },
+        { status: 400 },
+      );
+    }
+
+    // Verify ownership
+    const trend = await prisma.savedTrend.findFirst({
+      where: { id: body.id, userId: session.user.id },
+    });
+
+    if (!trend) {
+      return NextResponse.json(
+        { success: false, error: "Trend not found" },
+        { status: 404 },
+      );
+    }
+
+    const updateData: Record<string, unknown> = {};
+    if (body.notifyEmail !== undefined) {
+      updateData.notifyEmail = body.notifyEmail;
+    }
+
+    const updated = await prisma.savedTrend.update({
+      where: { id: trend.id },
+      data: updateData,
+    });
+
+    return NextResponse.json({ success: true, trend: updated });
+  } catch (error) {
+    console.error("[PATCH /api/trends/saved]", error);
+    return NextResponse.json(
+      { success: false, error: "Failed to update trend" },
+      { status: 500 },
+    );
+  }
+}
+
 // ─── DELETE: Remove a saved trend ────────────────────────────────────────────
 
 export async function DELETE(req: NextRequest) {
