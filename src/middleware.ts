@@ -5,7 +5,7 @@ import authConfig from "../auth.config";
 
 const { auth } = NextAuth(authConfig);
 
-const publicRoutes = ["/login", "/signup"];
+const publicRoutes = ["/login", "/signup", "/admin"];
 
 export default auth((req) => {
   const { nextUrl } = req;
@@ -26,8 +26,8 @@ export default auth((req) => {
     return NextResponse.redirect(new URL("/login", nextUrl));
   }
 
-  // Redirect logged-in users away from login/signup
-  if (isLoggedIn && isPublic) {
+  // Redirect logged-in users away from login/signup (but not /admin)
+  if (isLoggedIn && isPublic && nextUrl.pathname !== "/admin") {
     return NextResponse.redirect(new URL("/", nextUrl));
   }
 
