@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
       { success: true, sport, date, games: scores },
       {
         headers: {
-          "Cache-Control": "public, s-maxage=15, stale-while-revalidate=30",
+          "Cache-Control": "no-store",
         },
       },
     );

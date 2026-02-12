@@ -30,7 +30,7 @@ async function fetchLiveScores(
 
 /**
  * Polls ESPN live scores. Returns a Map keyed by "awayTeam@homeTeam" for O(1) lookup.
- * - Games in progress: polls every 30s
+ * - Games in progress: polls every 15s
  * - Games scheduled (not started yet): polls every 60s to detect starts
  * - All games final: stops polling
  */
@@ -38,12 +38,12 @@ export function useLiveScores(sport: string, date: string) {
   const query = useQuery({
     queryKey: ["live-scores", sport, date],
     queryFn: () => fetchLiveScores(sport, date),
-    staleTime: 10 * 1000,
+    staleTime: 5_000,
     refetchInterval: (query) => {
       const games = query.state.data;
       if (!games || games.length === 0) return 60_000;
       const hasLive = games.some((g) => g.status === "in_progress");
-      if (hasLive) return 30_000; // Active games: poll fast
+      if (hasLive) return 15_000; // Active games: poll fast
       const hasScheduled = games.some((g) => g.status === "scheduled");
       if (hasScheduled) return 60_000; // Waiting for tipoff: poll slow
       return false; // All final: stop

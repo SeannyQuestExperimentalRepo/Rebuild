@@ -195,11 +195,14 @@ export async function fetchScoreboard(
   date?: string,
 ): Promise<ESPNGame[]> {
   let url = SCOREBOARD_URLS[sport];
+  // groups=50 returns ALL D1 games (not just featured/top-25)
+  // groups=80 for NCAAF FBS; NFL doesn't need groups
+  const groups = sport === "NCAAMB" ? "&groups=50" : sport === "NCAAF" ? "&groups=80" : "";
   if (date) {
     const dateParam = date.replace(/-/g, "");
-    url += `?dates=${dateParam}&limit=200`;
+    url += `?dates=${dateParam}&limit=200${groups}`;
   } else {
-    url += "?limit=200";
+    url += `?limit=200${groups}`;
   }
 
   try {
