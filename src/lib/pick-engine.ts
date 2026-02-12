@@ -45,6 +45,7 @@ import { wilsonInterval } from "./trend-stats";
 import { executeTeamReverseLookup } from "./reverse-lookup-engine";
 import { executePlayerPropQueryFromDB } from "./prop-trend-engine";
 import { getKenpomRatings, getKenpomFanMatch, lookupRating, type KenpomRating, type KenpomFanMatch } from "./kenpom";
+import { getCFBDRatings, lookupCFBDRating, type CFBDRating } from "./cfbd";
 import type { Sport } from "@prisma/client";
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
@@ -105,10 +106,10 @@ const SPREAD_WEIGHTS: Record<string, Record<string, number>> = {
     situational: 0.10,
   },
   NCAAF: {
-    modelEdge: 0.20,
+    modelEdge: 0.30,     // SP+ efficiency ratings (up from 0.20 with power ratings)
     seasonATS: 0.15,
-    trendAngles: 0.25,
-    recentForm: 0.20,
+    trendAngles: 0.20,
+    recentForm: 0.15,
     h2h: 0.10,
     situational: 0.10,
   },
@@ -140,11 +141,11 @@ const OU_WEIGHTS: Record<string, Record<string, number>> = {
     h2hWeather: 0.25,
   },
   NCAAF: {
-    modelEdge: 0.20,
-    seasonOU: 0.20,
+    modelEdge: 0.30,     // SP+ efficiency ratings (up from 0.20 with power ratings)
+    seasonOU: 0.15,
     trendAngles: 0.20,
     recentForm: 0.15,
-    h2hWeather: 0.25,
+    h2hWeather: 0.20,
   },
   NBA: {
     modelEdge: 0.25,
@@ -719,6 +720,109 @@ function computePowerRatingEdge(
       label: `Power rating total: predicted ${predictedTotal.toFixed(1)} vs line ${overUnder} (${totalEdge > 0 ? "+" : ""}${totalEdge.toFixed(1)})`,
       strength: absMag >= 5 ? "strong" : absMag >= 3 ? "moderate" : absMag >= 1 ? "weak" : "noise",
     };
+  }
+
+  return { spread: spreadSignal, ou: ouSignal };
+}
+
+// ─── Model Edge: SP+ Ratings (NCAAF) ─────────────────────────────────────────
+// Uses CollegeFootballData.com SP+ efficiency ratings as the NCAAF equivalent
+// of KenPom for NCAAMB. SP+ overall ≈ AdjEM, offense ≈ AdjOE, defense ≈ AdjDE.
+
+function computeSPEdge(
+  cfbdRatings: Map<string, CFBDRating>,
+  homeTeam: string,
+  awayTeam: string,
+  spread: number | null,
+  overUnder: number | null,
+  isNeutralSite = false,
+): { spread: SignalResult; ou: SignalResult } {
+  const neutral: SignalResult = {
+    category: "modelEdge",
+    direction: "neutral",
+    magnitude: 0,
+    confidence: 0,
+    label: "No SP+ data available",
+    strength: "noise",
+  };
+
+  const homeR = lookupCFBDRating(cfbdRatings, homeTeam);
+  const awayR = lookupCFBDRating(cfbdRatings, awayTeam);
+
+  if (!homeR || !awayR) return { spread: neutral, ou: { ...neutral } };
+
+  const homeEM = homeR.rating;   // SP+ overall
+  const awayEM = awayR.rating;
+  const homeOff = homeR.offense.rating;
+  const awayOff = awayR.offense.rating;
+  const homeDef = homeR.defense.rating;
+  const awayDef = awayR.defense.rating;
+
+  const hca = isNeutralSite ? 0 : 3.0;  // NCAAF HCA ~3 points
+
+  // ── Spread: SP+ predicted margin ──
+  let spreadSignal: SignalResult = neutral;
+  if (spread !== null) {
+    const predictedMargin = homeEM - awayEM + hca;
+    const spreadEdge = predictedMargin + spread;
+    const absMag = clamp(Math.abs(spreadEdge) / 0.8, 0, 10);  // More sensitive than power rating (1.0)
+    const conf = 0.75;  // SP+ is well-calibrated; higher than crude power rating (0.55)
+
+    spreadSignal = {
+      category: "modelEdge",
+      direction: spreadEdge > 0.5 ? "home" : spreadEdge < -0.5 ? "away" : "neutral",
+      magnitude: absMag,
+      confidence: conf,
+      label: `SP+ [#${homeR.ranking} ${homeEM > 0 ? "+" : ""}${homeEM.toFixed(1)} vs #${awayR.ranking} ${awayEM > 0 ? "+" : ""}${awayEM.toFixed(1)}]: margin ${predictedMargin > 0 ? "+" : ""}${predictedMargin.toFixed(1)}, edge ${spreadEdge > 0 ? "+" : ""}${spreadEdge.toFixed(1)}`,
+      strength: absMag >= 7 ? "strong" : absMag >= 4 ? "moderate" : absMag >= 1.5 ? "weak" : "noise",
+    };
+  }
+
+  // ── O/U: SP+ predicted total via offense/defense matchups ──
+  let ouSignal: SignalResult = { ...neutral };
+  if (overUnder !== null) {
+    // SP+ defense is inverse to KenPom (lower = better defense in SP+)
+    // Predicted total based on offense/defense matchups:
+    // Each team's expected score ≈ (teamOff - oppDef) adjusted to average
+    const avgTotal = 49;  // NCAAF average total points
+    const homeExpected = avgTotal / 2 + (homeOff + awayDef) / 4;
+    const awayExpected = avgTotal / 2 + (awayOff + homeDef) / 4;
+    const predictedTotal = homeExpected + awayExpected;
+
+    const edge = predictedTotal - overUnder;
+    const absEdge = Math.abs(edge);
+
+    let ouDir: "over" | "under" | "neutral" = "neutral";
+    let ouMag = 0;
+    let ouConf = 0;
+
+    // Edge-to-confidence mapping (similar to KenPom regression, but less tuned)
+    if (absEdge >= 8) {
+      ouDir = edge > 0 ? "over" : "under";
+      ouMag = 9; ouConf = 0.85;
+    } else if (absEdge >= 5) {
+      ouDir = edge > 0 ? "over" : "under";
+      ouMag = 7; ouConf = 0.75;
+    } else if (absEdge >= 3) {
+      ouDir = edge > 0 ? "over" : "under";
+      ouMag = 5; ouConf = 0.65;
+    } else if (absEdge >= 2) {
+      ouDir = edge > 0 ? "over" : "under";
+      ouMag = 4; ouConf = 0.55;
+    } else {
+      // < 2 points: too close
+    }
+
+    if (ouDir !== "neutral") {
+      ouSignal = {
+        category: "modelEdge",
+        direction: ouDir,
+        magnitude: ouMag,
+        confidence: ouConf,
+        label: `SP+ O/U: pred=${predictedTotal.toFixed(1)} vs line ${overUnder} (edge ${edge > 0 ? "+" : ""}${edge.toFixed(1)}), Off=${(homeOff + awayOff).toFixed(0)} Def=${(homeDef + awayDef).toFixed(0)}`,
+        strength: ouMag >= 7 ? "strong" : ouMag >= 4 ? "moderate" : ouMag >= 1.5 ? "weak" : "noise",
+      };
+    }
   }
 
   return { spread: spreadSignal, ou: ouSignal };
@@ -1915,6 +2019,16 @@ export async function generateDailyPicks(
     }
   }
 
+  // Fetch SP+ ratings for NCAAF (cached for 6h)
+  let cfbdRatings: Map<string, CFBDRating> | null = null;
+  if (sport === "NCAAF") {
+    try {
+      cfbdRatings = await getCFBDRatings();
+    } catch (err) {
+      console.error("[pick-engine] CFBD SP+ fetch failed, continuing without:", err);
+    }
+  }
+
   const allPicks: GeneratedPick[] = [];
   const batchSize = 4;
 
@@ -1942,11 +2056,12 @@ export async function generateDailyPicks(
             discoverTeamAngles(sport, canonAway, "away", currentSeason),
           ]);
 
-          // Compute model edge (KenPom for NCAAMB, power rating for NFL/NCAAF)
-          // KenPom lookup uses UpcomingGame names (which match KenPom naming)
+          // Compute model edge (KenPom for NCAAMB, SP+ for NCAAF, power rating for NFL/NBA)
           const modelPrediction = sport === "NCAAMB"
             ? computeKenPomEdge(kenpomRatings, game.homeTeam, game.awayTeam, sport, game.spread, game.overUnder, game.gameDate, kenpomFanMatch)
-            : computePowerRatingEdge(allGames, canonHome, canonAway, sport, currentSeason, game.spread, game.overUnder);
+            : sport === "NCAAF" && cfbdRatings && cfbdRatings.size > 0
+              ? computeSPEdge(cfbdRatings, game.homeTeam, game.awayTeam, game.spread, game.overUnder)
+              : computePowerRatingEdge(allGames, canonHome, canonAway, sport, currentSeason, game.spread, game.overUnder);
 
           // ── Score Spread ──
           if (game.spread !== null) {

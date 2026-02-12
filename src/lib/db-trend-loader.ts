@@ -189,6 +189,18 @@ async function loadNCAAFFromDB(filters?: DBLoadFilters): Promise<TrendGame[]> {
     const homeScore = row.homeScore ?? 0;
     const awayScore = row.awayScore ?? 0;
 
+    // Map SP+ → AdjEM/AdjOE/AdjDE equivalents + compute derived fields
+    const hasSP = row.homeSpOverall != null && row.awaySpOverall != null;
+    const spPredMargin = hasSP
+      ? (row.homeSpOverall! - row.awaySpOverall!) + (row.isNeutralSite ? 0 : 3.0)
+      : null;
+    const efficiencyGap = hasSP
+      ? Math.abs(row.homeSpOverall! - row.awaySpOverall!)
+      : null;
+    const isSpUpset = spPredMargin != null && row.spread != null
+      ? (spPredMargin > 0 && row.spread > 0) || (spPredMargin < 0 && row.spread < 0)
+      : false;
+
     return {
       sport: "NCAAF" as const,
       season: row.season,
@@ -226,12 +238,12 @@ async function loadNCAAFFromDB(filters?: DBLoadFilters): Promise<TrendGame[]> {
       overtimes: 0,
       homeSeed: null,
       awaySeed: null,
-      homeAdjEM: null,
-      awayAdjEM: null,
-      homeAdjOE: null,
-      awayAdjOE: null,
-      homeAdjDE: null,
-      awayAdjDE: null,
+      homeAdjEM: row.homeSpOverall ?? null,
+      awayAdjEM: row.awaySpOverall ?? null,
+      homeAdjOE: row.homeSpOffense ?? null,
+      awayAdjOE: row.awaySpOffense ?? null,
+      homeAdjDE: row.homeSpDefense ?? null,
+      awayAdjDE: row.awaySpDefense ?? null,
       homeAdjTempo: null,
       awayAdjTempo: null,
       fmHomePred: null,
@@ -250,9 +262,9 @@ async function loadNCAAFFromDB(filters?: DBLoadFilters): Promise<TrendGame[]> {
       awayConference: away.conference,
       expectedPace: null,
       paceMismatch: null,
-      efficiencyGap: null,
-      kenpomPredMargin: null,
-      isKenpomUpset: false,
+      efficiencyGap,
+      kenpomPredMargin: spPredMargin,
+      isKenpomUpset: isSpUpset,
       gameStyle: null,
       _raw: {
         homeTeamCanonical: home.name,

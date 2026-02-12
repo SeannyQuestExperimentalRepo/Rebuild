@@ -463,6 +463,74 @@ export async function enrichNCAAMBGamesWithKenpom(
   return { enriched, notMatched };
 }
 
+// ─── NCAAF SP+ Enrichment ────────────────────────────────────────────────────
+
+/**
+ * Enrich NCAAFGame rows with SP+ ratings from CollegeFootballData.com.
+ * Mirrors enrichNCAAMBGamesWithKenpom() pattern.
+ */
+export async function enrichNCAAFGamesWithSP(
+  season?: number,
+): Promise<{ enriched: number; notMatched: number }> {
+  const { getCFBDRatings, lookupCFBDRating } = await import("./cfbd");
+
+  const targetSeason = season ?? getSeason(new Date(), "NCAAF");
+  const ratings = await getCFBDRatings(targetSeason);
+  if (!ratings || ratings.size === 0) {
+    console.log(`[SP+ Enrich] No ratings available for season ${targetSeason}`);
+    return { enriched: 0, notMatched: 0 };
+  }
+
+  // Find games missing SP+ data
+  const games = await prisma.nCAAFGame.findMany({
+    where: {
+      season: targetSeason,
+      homeSpOverall: null,
+    },
+    select: {
+      id: true,
+      homeTeam: { select: { name: true } },
+      awayTeam: { select: { name: true } },
+    },
+  });
+
+  if (games.length === 0) {
+    console.log(`[SP+ Enrich] No games need enrichment for season ${targetSeason}`);
+    return { enriched: 0, notMatched: 0 };
+  }
+
+  let enriched = 0;
+  let notMatched = 0;
+
+  for (const game of games) {
+    const homeR = lookupCFBDRating(ratings, game.homeTeam.name);
+    const awayR = lookupCFBDRating(ratings, game.awayTeam.name);
+
+    if (!homeR || !awayR) {
+      notMatched++;
+      continue;
+    }
+
+    await prisma.nCAAFGame.update({
+      where: { id: game.id },
+      data: {
+        homeSpOverall: homeR.rating,
+        awaySpOverall: awayR.rating,
+        homeSpOffense: homeR.offense.rating,
+        awaySpOffense: awayR.offense.rating,
+        homeSpDefense: homeR.defense.rating,
+        awaySpDefense: awayR.defense.rating,
+      },
+    });
+    enriched++;
+  }
+
+  console.log(
+    `[SP+ Enrich] Season ${targetSeason}: enriched=${enriched}, notMatched=${notMatched}, total=${games.length}`,
+  );
+  return { enriched, notMatched };
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /** Calculate spread result from HOME perspective. Exported for future use. */

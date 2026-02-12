@@ -179,6 +179,14 @@ model NCAAFGame {
   overUnder        Float?
   spreadResult     SpreadResult?
   ouResult         OUResult?
+  homeSpOverall    Float?           // SP+ overall rating
+  awaySpOverall    Float?
+  homeSpOffense    Float?           // SP+ offensive rating
+  awaySpOffense    Float?
+  homeSpDefense    Float?           // SP+ defensive rating
+  awaySpDefense    Float?
+  moneylineHome    Int?
+  moneylineAway    Int?
   isPlayoff        Boolean          @default(false) // CFP games
   isNeutralSite    Boolean          @default(false)
   source           String?

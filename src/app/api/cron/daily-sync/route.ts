@@ -215,6 +215,26 @@ export async function POST(request: NextRequest) {
       results.kenpom_enrich_NCAAMB = { error: "Unknown error" };
     }
 
+    // 2.7. Enrich NCAAF games with SP+ ratings from CollegeFootballData.com
+    // SP+ (overall/offense/defense) are the NCAAF equivalent of KenPom metrics.
+    try {
+      const enrichResult = await Sentry.startSpan(
+        { name: "cron.sp_enrich.NCAAF", op: "cron.step" },
+        async () => {
+          const { enrichNCAAFGamesWithSP } = await import("@/lib/espn-sync");
+          return enrichNCAAFGamesWithSP();
+        },
+      );
+      results.sp_enrich_NCAAF = enrichResult;
+      console.log(
+        `[Cron] SP+ enrich: enriched=${enrichResult.enriched}, notMatched=${enrichResult.notMatched}`,
+      );
+    } catch (err) {
+      Sentry.captureException(err, { tags: { cronStep: "sp_enrich", sport: "NCAAF" } });
+      console.error("[Cron] SP+ enrichment failed:", err);
+      results.sp_enrich_NCAAF = { error: "Unknown error" };
+    }
+
     // 3. Pre-generate today's daily picks for all sports
     // Done here (after odds refresh) so picks are ready before users check
     {
