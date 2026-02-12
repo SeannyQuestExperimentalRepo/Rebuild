@@ -9,6 +9,7 @@ interface MovesResponse {
 
 async function fetchSignificantMoves(sport: string): Promise<SignificantMove[]> {
   const res = await fetch(`/api/odds/significant-moves?sport=${sport}`);
+  if (!res.ok) throw new Error(`Significant moves request failed (${res.status})`);
   const data: MovesResponse = await res.json();
   if (!data.success) throw new Error("Failed to fetch significant moves");
   return data.moves;

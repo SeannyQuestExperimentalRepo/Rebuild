@@ -240,6 +240,7 @@ export async function POST(request: NextRequest) {
           results[`picks_${sport}`] = { generated: picks.length };
           console.log(`[Cron] Generated ${picks.length} picks for ${sport}`);
         } catch (err) {
+          Sentry.captureException(err, { tags: { cronStep: "generate_picks", sport } });
           console.error(`[Cron] Pick generation failed for ${sport}:`, err);
           results[`picks_${sport}`] = { error: "Unknown error" };
         }

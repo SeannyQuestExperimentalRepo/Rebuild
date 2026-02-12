@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ConfidenceStars } from "./confidence-stars";
 import { SignificanceBadge } from "@/components/trends/significance-badge";
 import { TrackBetButton } from "./track-bet-button";
+import type { LiveScore } from "@/hooks/use-live-scores";
 
 interface ReasoningEntry {
   angle: string;
@@ -34,6 +35,7 @@ interface Pick {
 interface GamePickCardProps {
   spreadPick?: Pick;
   ouPick?: Pick;
+  liveScore?: LiveScore;
 }
 
 function PickBox({ pick }: { pick: Pick }) {
@@ -110,20 +112,59 @@ function PickBox({ pick }: { pick: Pick }) {
   );
 }
 
-export function GamePickCard({ spreadPick, ouPick }: GamePickCardProps) {
+function GameStatus({ liveScore, gameDate }: { liveScore?: LiveScore; gameDate: string }) {
+  if (!liveScore || liveScore.status === "scheduled") {
+    const gameTime = new Date(gameDate).toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: "America/New_York",
+    });
+    return <span>{gameTime} ET</span>;
+  }
+
+  if (liveScore.status === "in_progress") {
+    return (
+      <span className="flex items-center gap-1.5 font-semibold text-emerald-400">
+        <span className="relative flex h-2 w-2">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+        </span>
+        <span className="font-mono tabular-nums">
+          {liveScore.awayScore} - {liveScore.homeScore}
+        </span>
+        <span className="font-normal text-muted-foreground/70">{liveScore.statusDetail}</span>
+      </span>
+    );
+  }
+
+  // Final
+  return (
+    <span className="flex items-center gap-1.5 text-muted-foreground">
+      <span className="font-mono font-semibold tabular-nums text-foreground/80">
+        {liveScore.awayScore} - {liveScore.homeScore}
+      </span>
+      <span>Final</span>
+    </span>
+  );
+}
+
+export function GamePickCard({ spreadPick, ouPick, liveScore }: GamePickCardProps) {
   const pick = spreadPick || ouPick;
   if (!pick) return null;
 
-  const gameTime = new Date(pick.gameDate).toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: "America/New_York",
-  });
+  const isLive = liveScore?.status === "in_progress";
+  const isFinal = liveScore?.status === "final";
 
   return (
-    <div className="rounded-xl border border-border/60 bg-card p-4 transition-colors hover:border-primary/25">
+    <div className={`rounded-xl border bg-card p-4 transition-colors ${
+      isLive
+        ? "border-emerald-500/30 hover:border-emerald-500/50"
+        : isFinal
+          ? "border-border/40"
+          : "border-border/60 hover:border-primary/25"
+    }`}>
       {/* Header */}
-      <div className="mb-3 flex items-baseline justify-between">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
         <div className="text-sm font-medium">
           {pick.awayRank && pick.awayRank <= 25 ? <span className="text-primary/80">#{pick.awayRank} </span> : null}
           {pick.awayTeam} <span className="text-muted-foreground">@</span>{" "}
@@ -135,7 +176,7 @@ export function GamePickCard({ spreadPick, ouPick }: GamePickCardProps) {
             <span className="font-mono">Spread: {spreadPick.line > 0 ? "+" : ""}{spreadPick.line}</span>
           )}
           {ouPick?.line != null && <span className="font-mono">O/U: {ouPick.line}</span>}
-          <span>{gameTime} ET</span>
+          <GameStatus liveScore={liveScore} gameDate={pick.gameDate} />
         </div>
       </div>
 

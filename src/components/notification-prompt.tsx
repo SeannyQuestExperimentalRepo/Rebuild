@@ -1,12 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSession } from "next-auth/react";
 
 export function NotificationPrompt() {
+  const { status } = useSession();
   const [showPrompt, setShowPrompt] = useState(false);
   const [subscribed, setSubscribed] = useState(false);
 
   useEffect(() => {
+    // Only show to authenticated users (subscribe endpoint requires auth)
+    if (status !== "authenticated") return;
+
     // Only show on supported browsers with SW
     if (typeof window === "undefined") return;
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
@@ -30,7 +35,7 @@ export function NotificationPrompt() {
     // Show after 10 seconds on the page
     const timer = setTimeout(() => setShowPrompt(true), 10000);
     return () => clearTimeout(timer);
-  }, []);
+  }, [status]);
 
   const handleSubscribe = async () => {
     try {

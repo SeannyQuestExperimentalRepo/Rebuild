@@ -8,11 +8,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { authLimiter, applyRateLimit } from "@/lib/rate-limit";
+import { VALID_SPORTS } from "@/lib/trend-engine";
 import type { Sport } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
-
-const VALID_SPORTS = ["NFL", "NCAAF", "NCAAMB"];
 
 export async function GET(req: NextRequest) {
   const limited = applyRateLimit(req, authLimiter);

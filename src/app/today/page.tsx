@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useDailyPicks, usePickRecord } from "@/hooks/use-daily-picks";
+import { useLiveScores } from "@/hooks/use-live-scores";
 import { TrackRecordBar } from "@/components/picks/track-record-bar";
 import { GamePickCard } from "@/components/picks/game-pick-card";
 import { PropPickCard } from "@/components/picks/prop-pick-card";
@@ -28,6 +29,7 @@ export default function TodayPage() {
 
   const { data: picksData, isLoading, error: picksError } = useDailyPicks(sport, date);
   const { data: recordData } = usePickRecord(sport, 30);
+  const { scoreMap } = useLiveScores(sport, date);
 
   const error = picksError ? (picksError as Error).message : null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -61,10 +63,15 @@ export default function TodayPage() {
     topPlays.map((p) => `${p.awayTeam}@${p.homeTeam}`),
   );
 
-  // Remaining game groups (3-star)
-  const remainingGroups = Array.from(gameGroups.entries()).filter(
-    ([key]) => !topPlayKeys.has(key),
-  );
+  // Remaining game groups (3-star), sorted: live first, then scheduled, then final
+  const statusOrder = { in_progress: 0, scheduled: 1, final: 2 } as const;
+  const remainingGroups = Array.from(gameGroups.entries())
+    .filter(([key]) => !topPlayKeys.has(key))
+    .sort(([keyA], [keyB]) => {
+      const statusA = scoreMap.get(keyA)?.status ?? "scheduled";
+      const statusB = scoreMap.get(keyB)?.status ?? "scheduled";
+      return (statusOrder[statusA] ?? 1) - (statusOrder[statusB] ?? 1);
+    });
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
@@ -152,6 +159,7 @@ export default function TodayPage() {
                   key={key}
                   spreadPick={group?.spread}
                   ouPick={group?.ou}
+                  liveScore={scoreMap.get(key)}
                 />
               );
             })}
@@ -185,6 +193,7 @@ export default function TodayPage() {
                 key={key}
                 spreadPick={group.spread}
                 ouPick={group.ou}
+                liveScore={scoreMap.get(key)}
               />
             ))}
           </div>

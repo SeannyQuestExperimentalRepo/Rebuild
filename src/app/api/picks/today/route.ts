@@ -59,7 +59,6 @@ export async function GET(req: NextRequest) {
     }
 
     const dateKey = new Date(date + "T00:00:00Z");
-    const now = new Date();
 
     // Check if picks already exist in DB for this date (all games, not just upcoming)
     const allPicks = await prisma.dailyPick.findMany({
@@ -131,10 +130,9 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Filter for display: hide picks for games that have already started,
-    // but they remain in DB for grading
+    // Show all picks for the day (including started/final games for live tracking)
+    // Filter only by subscription tier
     const displayPicks = allPicks
-      .filter((p) => p.gameDate >= now)
       .filter((p) => p.confidence <= maxStars);
 
     // Enrich picks with team rankings from UpcomingGame table

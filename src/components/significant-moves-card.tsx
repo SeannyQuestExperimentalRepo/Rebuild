@@ -10,9 +10,7 @@ interface SignificantMovesCardProps {
 
 function MoveRow({ move, sport }: { move: SignificantMove; sport: string }) {
   const isMajor = move.severity === "major";
-  const formattedDelta = move.type === "spread"
-    ? `${move.delta > 0 ? "+" : ""}${move.delta.toFixed(1)}`
-    : `${move.delta > 0 ? "+" : ""}${move.delta.toFixed(1)}`;
+  const formattedDelta = `${move.delta > 0 ? "+" : ""}${move.delta.toFixed(1)}`;
 
   return (
     <Link
@@ -35,7 +33,7 @@ function MoveRow({ move, sport }: { move: SignificantMove; sport: string }) {
               : "bg-amber-500/15 text-amber-400"
           }`}
         >
-          {formattedDelta} {move.type === "spread" ? "pts" : "pts"}
+          {formattedDelta} pts
         </span>
       </div>
     </Link>

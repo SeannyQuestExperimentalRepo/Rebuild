@@ -98,8 +98,8 @@ interface GameRecord {
   fmHomeWinProb: number | null;
   spreadResult: string | null;
   ouResult: string | null;
-  homeTeam: { name: true extends true ? string : never };
-  awayTeam: { name: true extends true ? string : never };
+  homeTeam: { name: string };
+  awayTeam: { name: string };
 }
 
 interface TeamStats {

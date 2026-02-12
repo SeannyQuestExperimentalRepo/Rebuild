@@ -25,6 +25,7 @@ import {
 
 export type Sport = "NFL" | "NCAAF" | "NCAAMB";
 export type SportOrAll = Sport | "ALL";
+export const VALID_SPORTS: readonly string[] = ["NFL", "NCAAF", "NCAAMB"];
 
 export interface TrendGame {
   // Identity

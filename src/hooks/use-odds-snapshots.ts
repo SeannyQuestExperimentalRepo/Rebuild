@@ -20,6 +20,7 @@ async function fetchSnapshots(
 ): Promise<OddsSnapshotPoint[]> {
   const params = new URLSearchParams({ sport, home, away });
   const res = await fetch(`/api/odds/snapshots?${params}`);
+  if (!res.ok) throw new Error(`Odds snapshots request failed (${res.status})`);
   const data: SnapshotsResponse = await res.json();
   if (!data.success) throw new Error("Failed to fetch odds snapshots");
   return data.snapshots;
