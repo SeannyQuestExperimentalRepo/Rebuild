@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { signIn } from "next-auth/react";
 
 interface SystemStatus {
   date: string;
@@ -37,6 +38,12 @@ export default function AdminPage() {
       });
       const data = await res.json();
       if (data.success) {
+        // Also sign into NextAuth for full app access
+        await signIn("credentials", {
+          email: "admin@trendline.app",
+          password,
+          redirect: false,
+        });
         setAuthenticated(true);
         setPassword("");
       } else {

@@ -22,7 +22,26 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const email = (credentials.email as string)?.toLowerCase().trim();
         const password = credentials.password as string;
 
-        if (!email || !password) return null;
+        if (!password) return null;
+
+        // Admin password grants full ADMIN access
+        const adminPassword = process.env.ADMIN_PASSWORD;
+        if (adminPassword && password === adminPassword) {
+          const adminUser = await prisma.user.upsert({
+            where: { email: "admin@trendline.app" },
+            update: { role: "ADMIN" },
+            create: { email: "admin@trendline.app", name: "Admin", role: "ADMIN" },
+          });
+          return {
+            id: adminUser.id,
+            email: adminUser.email,
+            name: adminUser.name,
+            image: adminUser.image,
+            role: adminUser.role,
+          };
+        }
+
+        if (!email) return null;
 
         const user = await prisma.user.findUnique({ where: { email } });
         if (!user?.password) return null;
