@@ -9,10 +9,18 @@ const SignificantMovesCard = dynamic(
   { ssr: false }
 );
 
-const SPORTS = ["NFL", "NCAAF", "NCAAMB"] as const;
+const SPORTS = ["NCAAMB", "NFL", "NCAAF"] as const;
+
+/** Pick the sport most likely to have games today */
+function defaultSport(): string {
+  const m = new Date().getMonth();
+  if (m >= 10 || m <= 2) return "NCAAMB";
+  if (m >= 8) return "NFL";
+  return "NFL";
+}
 
 export default function OddsPage() {
-  const [sport, setSport] = useState<string>("NFL");
+  const [sport, setSport] = useState<string>(defaultSport);
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
