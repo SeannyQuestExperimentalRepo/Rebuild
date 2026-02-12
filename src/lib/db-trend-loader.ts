@@ -278,6 +278,28 @@ async function loadNCAAMBFromDB(filters?: DBLoadFilters): Promise<TrendGame[]> {
     const awayScore = row.awayScore ?? 0;
     const isNCAAT = row.isTournament;
 
+    // Compute KenPom derived fields from raw data
+    const hasEM = row.homeAdjEM != null && row.awayAdjEM != null;
+    const hasTempo = row.homeAdjTempo != null && row.awayAdjTempo != null;
+    const kenpomPredMargin = hasEM
+      ? (row.homeAdjEM! - row.awayAdjEM!) + (row.isNeutralSite ? 0 : 3.5)
+      : null;
+    const expectedPace = hasTempo
+      ? (row.homeAdjTempo! + row.awayAdjTempo!) / 2
+      : null;
+    const paceMismatch = hasTempo
+      ? Math.abs(row.homeAdjTempo! - row.awayAdjTempo!)
+      : null;
+    const efficiencyGap = hasEM
+      ? Math.abs(row.homeAdjEM! - row.awayAdjEM!)
+      : null;
+    const isKenpomUpset = kenpomPredMargin != null && row.spread != null
+      ? (kenpomPredMargin > 0 && row.spread > 0) || (kenpomPredMargin < 0 && row.spread < 0)
+      : false;
+    const gameStyle: "up-tempo" | "grind-it-out" | "balanced" | null = expectedPace != null
+      ? (expectedPace >= 70 ? "up-tempo" : expectedPace <= 64 ? "grind-it-out" : "balanced")
+      : null;
+
     return {
       sport: "NCAAMB" as const,
       season: row.season,
@@ -337,12 +359,12 @@ async function loadNCAAMBFromDB(filters?: DBLoadFilters): Promise<TrendGame[]> {
       awayIsBackToBack: false,
       homeConference: home.conference,
       awayConference: away.conference,
-      expectedPace: null,
-      paceMismatch: null,
-      efficiencyGap: null,
-      kenpomPredMargin: null,
-      isKenpomUpset: false,
-      gameStyle: null,
+      expectedPace,
+      paceMismatch,
+      efficiencyGap,
+      kenpomPredMargin,
+      isKenpomUpset,
+      gameStyle,
       _raw: {
         homeTeam: home.name,
         awayTeam: away.name,

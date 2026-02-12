@@ -30,5 +30,7 @@ export function useAngles(params: AngleParams, enabled = true) {
     ],
     queryFn: () => fetchAngles(params),
     enabled,
+    staleTime: 10 * 60 * 1000, // 10 min — matches server cache TTL
+    gcTime: 30 * 60 * 1000, // keep in cache 30 min
   });
 }

@@ -106,7 +106,10 @@ function TrendsPageInner() {
             {(["NFL", "NCAAF", "NCAAMB"] as SportFilter[]).map((s) => (
               <button
                 key={s}
-                onClick={() => setSport(s)}
+                onClick={() => {
+                  setSport(s);
+                  setSubmittedParams((prev) => ({ ...prev, sport: s }));
+                }}
                 className={`px-3.5 py-2 text-sm font-medium transition-all first:rounded-l-lg last:rounded-r-lg ${
                   sport === s
                     ? "bg-primary text-primary-foreground"

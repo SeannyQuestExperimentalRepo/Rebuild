@@ -185,10 +185,10 @@ export function analyzeTrendSignificance(
   } else {
     // Significant — classify by effect size
     const effectSize = Math.abs(observedRate - baselineRate);
-    if (effectSize >= 0.15 && trials >= 30) {
+    if (effectSize >= 0.12 && trials >= 25) {
       strength = "strong";
       label = `Strong trend (${(observedRate * 100).toFixed(1)}% vs ${(baselineRate * 100).toFixed(1)}% baseline, p=${pVal.toFixed(3)}, n=${trials})`;
-    } else if (effectSize >= 0.08 || trials >= 50) {
+    } else if (effectSize >= 0.06 || trials >= 40) {
       strength = "moderate";
       label = `Moderate trend (${(observedRate * 100).toFixed(1)}% vs ${(baselineRate * 100).toFixed(1)}% baseline, p=${pVal.toFixed(3)}, n=${trials})`;
     } else {

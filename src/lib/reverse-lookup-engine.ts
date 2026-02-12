@@ -502,12 +502,142 @@ const ANGLE_TEMPLATES: AngleTemplate[] = [
   },
   {
     id: "kenpom-upset-pick",
-    label: "KenPom predicted upsets (underdog by < 3)",
+    label: "KenPom-predicted upsets (KenPom disagrees with spread)",
     category: "combined",
     sports: ["NCAAMB"],
     perspective: "underdog",
+    filters: [{ field: "isKenpomUpset", operator: "eq", value: true }],
+  },
+
+  // ── KenPom Efficiency Angles (NCAAMB) ──────────────────────────────────────
+  {
+    id: "kenpom-elite-home",
+    label: "Home teams ranked in KenPom top 25",
+    category: "ranking",
+    sports: ["NCAAMB"],
+    perspective: "home",
+    filters: [{ field: "homeKenpomRank", operator: "lte", value: 25 }],
+  },
+  {
+    id: "kenpom-elite-vs-mid",
+    label: "KenPom top 25 vs 75+ ranked opponents",
+    category: "ranking",
+    sports: ["NCAAMB"],
+    perspective: "home",
     filters: [
-      { field: "kenpomPredMargin", operator: "between", value: [-3, 3] },
+      { field: "homeKenpomRank", operator: "lte", value: 25 },
+      { field: "awayKenpomRank", operator: "gte", value: 75 },
+    ],
+  },
+  {
+    id: "kenpom-close-matchup",
+    label: "KenPom predicted margin within 3 points",
+    category: "combined",
+    sports: ["NCAAMB"],
+    perspective: "underdog",
+    filters: [{ field: "kenpomPredMargin", operator: "between", value: [-3, 3] }],
+  },
+  {
+    id: "kenpom-blowout-fav",
+    label: "KenPom predicted margin 15+ (heavy favorite)",
+    category: "ranking",
+    sports: ["NCAAMB"],
+    perspective: "favorite",
+    filters: [{ field: "efficiencyGap", operator: "gte", value: 15 }],
+  },
+
+  // ── Tempo Angles (NCAAMB) ──────────────────────────────────────────────────
+  {
+    id: "up-tempo-matchup",
+    label: "Up-tempo matchups (both teams 69+ tempo)",
+    category: "tempo",
+    sports: ["NCAAMB"],
+    perspective: "home",
+    filters: [
+      { field: "homeAdjTempo", operator: "gte", value: 69 },
+      { field: "awayAdjTempo", operator: "gte", value: 69 },
+    ],
+  },
+  {
+    id: "slow-tempo-matchup",
+    label: "Slow-tempo matchups (both teams < 65 tempo)",
+    category: "tempo",
+    sports: ["NCAAMB"],
+    perspective: "home",
+    filters: [
+      { field: "homeAdjTempo", operator: "lt", value: 65 },
+      { field: "awayAdjTempo", operator: "lt", value: 65 },
+    ],
+  },
+  {
+    id: "tempo-mismatch",
+    label: "Major tempo mismatch (8+ difference)",
+    category: "tempo",
+    sports: ["NCAAMB"],
+    perspective: "home",
+    filters: [{ field: "paceMismatch", operator: "gte", value: 8 }],
+  },
+
+  // ── Efficiency Angles (NCAAMB) ─────────────────────────────────────────────
+  {
+    id: "elite-offense-home",
+    label: "Home teams with elite offense (AdjOE 115+)",
+    category: "ranking",
+    sports: ["NCAAMB"],
+    perspective: "home",
+    filters: [{ field: "homeAdjOE", operator: "gte", value: 115 }],
+  },
+  {
+    id: "elite-defense-home",
+    label: "Home teams with elite defense (AdjDE < 95)",
+    category: "ranking",
+    sports: ["NCAAMB"],
+    perspective: "home",
+    filters: [{ field: "homeAdjDE", operator: "lt", value: 95 }],
+  },
+  {
+    id: "efficiency-gap-large",
+    label: "Large efficiency gap (15+ AdjEM difference)",
+    category: "ranking",
+    sports: ["NCAAMB"],
+    perspective: "favorite",
+    filters: [{ field: "efficiencyGap", operator: "gte", value: 15 }],
+  },
+
+  // ── Situational (NCAAMB) ───────────────────────────────────────────────────
+  {
+    id: "conference-road-underdog",
+    label: "Road underdogs in conference games",
+    category: "conference",
+    sports: ["NCAAMB"],
+    perspective: "underdog",
+    filters: [{ field: "isConferenceGame", operator: "eq", value: true }],
+  },
+  {
+    id: "ncaamb-big-spread",
+    label: "Big college basketball favorites (spread 15+)",
+    category: "spread",
+    sports: ["NCAAMB"],
+    perspective: "favorite",
+    filters: [{ field: "spread", operator: "lte", value: -15 }],
+  },
+  {
+    id: "ncaamb-road-fav",
+    label: "Road favorites in NCAAMB",
+    category: "spread",
+    sports: ["NCAAMB"],
+    perspective: "favorite",
+    filters: [{ field: "spread", operator: "gt", value: 0 }],
+  },
+  {
+    id: "ncaat-double-digit-dog",
+    label: "Double-digit underdogs in NCAA Tournament",
+    category: "playoff",
+    sports: ["NCAAMB"],
+    perspective: "underdog",
+    filters: [
+      { field: "isNCAAT", operator: "eq", value: true },
+      { field: "spread", operator: "gte", value: 10 },
     ],
   },
 ];
