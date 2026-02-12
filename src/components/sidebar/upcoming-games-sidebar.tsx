@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { usePathname } from "next/navigation";
 import GameCard from "./game-card";
 import { useUpcomingGames } from "@/hooks/use-upcoming-games";
+import { useLiveScores, type LiveScore } from "@/hooks/use-live-scores";
 
 interface UpcomingGame {
   id: number;
@@ -42,9 +43,41 @@ export default function UpcomingGamesSidebar() {
   }, [pathname]);
 
   const { data, isLoading: loading, error: queryError, refetch } = useUpcomingGames(activeSport);
-  const games: UpcomingGame[] = data?.games ?? [];
+  const games = useMemo<UpcomingGame[]>(() => data?.games ?? [], [data]);
   const lastUpdated = data?.lastUpdated ?? null;
   const error = queryError ? (queryError as Error).message : null;
+
+  // Live scores — fetch for sports that have games today
+  const todayET = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  const sportsWithGames = useMemo(() => {
+    const sports = new Set<string>();
+    for (const g of games) {
+      if (g.gameDate.startsWith(todayET)) sports.add(g.sport);
+    }
+    return Array.from(sports);
+  }, [games, todayET]);
+
+  const ncaambScores = useLiveScores(
+    sportsWithGames.includes("NCAAMB") ? "NCAAMB" : "",
+    todayET,
+  );
+  const nflScores = useLiveScores(
+    sportsWithGames.includes("NFL") ? "NFL" : "",
+    todayET,
+  );
+  const ncaafScores = useLiveScores(
+    sportsWithGames.includes("NCAAF") ? "NCAAF" : "",
+    todayET,
+  );
+
+  // Merge all score maps into one lookup: "awayTeam@homeTeam" → LiveScore
+  const scoreMap = useMemo(() => {
+    const merged = new Map<string, LiveScore>();
+    ncaambScores.scoreMap.forEach((v, k) => merged.set(k, v));
+    nflScores.scoreMap.forEach((v, k) => merged.set(k, v));
+    ncaafScores.scoreMap.forEach((v, k) => merged.set(k, v));
+    return merged;
+  }, [ncaambScores.scoreMap, nflScores.scoreMap, ncaafScores.scoreMap]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -68,6 +101,19 @@ export default function UpcomingGamesSidebar() {
     ? formatTimeAgo(new Date(lastUpdated))
     : null;
 
+  // Sort: live games first, then scheduled, then future
+  const sortedGames = useMemo(() => {
+    const statusOrder: Record<string, number> = { in_progress: 0, final: 1, scheduled: 2 };
+    return [...games].sort((a, b) => {
+      const aScore = scoreMap.get(`${a.awayTeam}@${a.homeTeam}`);
+      const bScore = scoreMap.get(`${b.awayTeam}@${b.homeTeam}`);
+      const aOrder = statusOrder[aScore?.status ?? "scheduled"] ?? 2;
+      const bOrder = statusOrder[bScore?.status ?? "scheduled"] ?? 2;
+      if (aOrder !== bOrder) return aOrder - bOrder;
+      return new Date(a.gameDate).getTime() - new Date(b.gameDate).getTime();
+    });
+  }, [games, scoreMap]);
+
   // Group games by sport for display when showing all
   const showSportLabel = !activeSport;
 
@@ -77,7 +123,7 @@ export default function UpcomingGamesSidebar() {
         {/* Header */}
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground/70">
-            Upcoming
+            {scoreMap.size > 0 ? "Scoreboard" : "Upcoming"}
           </h2>
           <button
             onClick={handleRefresh}
@@ -163,7 +209,7 @@ export default function UpcomingGamesSidebar() {
               Try refreshing
             </button>
           </div>
-        ) : games.length === 0 ? (
+        ) : sortedGames.length === 0 ? (
           <div className="rounded-xl border border-border/60 bg-card p-4 text-center">
             <p className="text-sm text-muted-foreground">
               No upcoming games with odds
@@ -177,11 +223,11 @@ export default function UpcomingGamesSidebar() {
           </div>
         ) : (
           <div className="space-y-2">
-            {games.map((game, i) => (
+            {sortedGames.map((game, i) => (
               <div key={game.id}>
                 {/* Sport separator label when showing multiple sports */}
                 {showSportLabel &&
-                  (i === 0 || game.sport !== games[i - 1].sport) && (
+                  (i === 0 || game.sport !== sortedGames[i - 1].sport) && (
                     <div className="mb-1.5 mt-4 first:mt-0">
                       <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground/70">
                         {game.sport}
@@ -199,6 +245,7 @@ export default function UpcomingGamesSidebar() {
                   moneylineHome={game.moneylineHome}
                   moneylineAway={game.moneylineAway}
                   sport={game.sport}
+                  liveScore={scoreMap.get(`${game.awayTeam}@${game.homeTeam}`)}
                 />
               </div>
             ))}

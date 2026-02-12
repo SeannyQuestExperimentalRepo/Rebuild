@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 export interface LiveScore {
@@ -29,29 +30,37 @@ async function fetchLiveScores(
 
 /**
  * Polls ESPN live scores. Returns a Map keyed by "awayTeam@homeTeam" for O(1) lookup.
- * Polling activates only when at least one game is in progress.
+ * - Games in progress: polls every 30s
+ * - Games scheduled (not started yet): polls every 60s to detect starts
+ * - All games final: stops polling
  */
 export function useLiveScores(sport: string, date: string) {
   const query = useQuery({
     queryKey: ["live-scores", sport, date],
     queryFn: () => fetchLiveScores(sport, date),
-    staleTime: 10 * 1000, // 10 seconds
+    staleTime: 10 * 1000,
     refetchInterval: (query) => {
       const games = query.state.data;
-      if (!games) return 30_000; // Default 30s until we have data
+      if (!games || games.length === 0) return 60_000;
       const hasLive = games.some((g) => g.status === "in_progress");
-      return hasLive ? 30_000 : false; // Poll only when games are live
+      if (hasLive) return 30_000; // Active games: poll fast
+      const hasScheduled = games.some((g) => g.status === "scheduled");
+      if (hasScheduled) return 60_000; // Waiting for tipoff: poll slow
+      return false; // All final: stop
     },
     enabled: !!sport && !!date,
   });
 
-  // Build lookup map for O(1) access by matchup key
-  const scoreMap = new Map<string, LiveScore>();
-  if (query.data) {
-    for (const game of query.data) {
-      scoreMap.set(`${game.awayTeam}@${game.homeTeam}`, game);
+  // Memoize the lookup map so consumers don't re-render needlessly
+  const scoreMap = useMemo(() => {
+    const map = new Map<string, LiveScore>();
+    if (query.data) {
+      for (const game of query.data) {
+        map.set(`${game.awayTeam}@${game.homeTeam}`, game);
+      }
     }
-  }
+    return map;
+  }, [query.data]);
 
   return {
     ...query,
