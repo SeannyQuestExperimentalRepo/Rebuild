@@ -1,6 +1,7 @@
 "use client";
 
 import { useSession, signOut } from "next-auth/react";
+import Image from "next/image";
 import Link from "next/link";
 import { useState, useRef, useEffect } from "react";
 
@@ -51,9 +52,11 @@ export function UserMenu() {
         className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/20 text-xs font-semibold text-primary ring-1 ring-primary/30 transition-all hover:ring-primary/60"
       >
         {user.image ? (
-          <img
+          <Image
             src={user.image}
             alt=""
+            width={32}
+            height={32}
             className="h-8 w-8 rounded-full object-cover"
           />
         ) : (
@@ -70,7 +73,29 @@ export function UserMenu() {
             <p className="truncate text-xs text-muted-foreground">
               {user.email}
             </p>
+            {session.user.role === "PREMIUM" && (
+              <span className="mt-1 inline-block rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary">
+                Premium
+              </span>
+            )}
           </div>
+          {session.user.role === "PREMIUM" ? (
+            <Link
+              href="/pricing"
+              onClick={() => setOpen(false)}
+              className="block w-full px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            >
+              Manage Subscription
+            </Link>
+          ) : session.user.role !== "ADMIN" ? (
+            <Link
+              href="/pricing"
+              onClick={() => setOpen(false)}
+              className="block w-full px-3 py-2 text-left text-sm text-primary transition-colors hover:bg-secondary"
+            >
+              Upgrade to Premium
+            </Link>
+          ) : null}
           <button
             onClick={() => signOut({ callbackUrl: "/" })}
             className="w-full px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"

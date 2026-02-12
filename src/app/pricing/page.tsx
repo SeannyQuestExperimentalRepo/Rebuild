@@ -1,11 +1,19 @@
 "use client";
 
 import { useState } from "react";
+import { useSession } from "next-auth/react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { TIER_CONFIG, PRICING_FEATURES } from "@/lib/subscription";
 
 export default function PricingPage() {
   const [annual, setAnnual] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const { data: session } = useSession();
+  const searchParams = useSearchParams();
+
+  const success = searchParams.get("success") === "true";
+  const canceled = searchParams.get("canceled") === "true";
 
   const premium = TIER_CONFIG.PREMIUM;
   const monthlyPrice = annual
@@ -14,6 +22,52 @@ export default function PricingPage() {
   const savings = annual
     ? premium.priceMonthly * 12 - premium.priceAnnual
     : 0;
+
+  const isSubscribed =
+    session?.user?.role === "PREMIUM" || session?.user?.role === "ADMIN";
+
+  async function handleSubscribe() {
+    if (!session?.user) {
+      window.location.href = "/login";
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan: annual ? "annual" : "monthly" }),
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        console.error("Checkout error:", data.error);
+        setLoading(false);
+      }
+    } catch {
+      setLoading(false);
+    }
+  }
+
+  async function handleManage() {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/stripe/portal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        console.error("Portal error:", data.error);
+        setLoading(false);
+      }
+    } catch {
+      setLoading(false);
+    }
+  }
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-16">
@@ -25,6 +79,18 @@ export default function PricingPage() {
           Unlock every edge. Full access to picks, props, bet tracking, and live odds.
         </p>
       </div>
+
+      {/* Success / Cancel banners */}
+      {success && (
+        <div className="mt-6 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-center text-sm text-emerald-400">
+          Subscription activated! You now have Premium access.
+        </div>
+      )}
+      {canceled && (
+        <div className="mt-6 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-center text-sm text-amber-400">
+          Checkout was canceled. No charges were made.
+        </div>
+      )}
 
       {/* Billing toggle */}
       <div className="mt-8 flex items-center justify-center gap-3">
@@ -116,9 +182,23 @@ export default function PricingPage() {
               </span>
             )}
           </div>
-          <button className="mt-6 w-full rounded-lg bg-primary px-4 py-2.5 text-center text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90">
-            Subscribe Now
-          </button>
+          {isSubscribed ? (
+            <button
+              onClick={handleManage}
+              disabled={loading}
+              className="mt-6 w-full rounded-lg border border-primary/40 bg-primary/10 px-4 py-2.5 text-center text-sm font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
+            >
+              {loading ? "Loading..." : "Manage Subscription"}
+            </button>
+          ) : (
+            <button
+              onClick={handleSubscribe}
+              disabled={loading}
+              className="mt-6 w-full rounded-lg bg-primary px-4 py-2.5 text-center text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+            >
+              {loading ? "Loading..." : "Subscribe Now"}
+            </button>
+          )}
           <ul className="mt-8 space-y-3">
             {PRICING_FEATURES.map((f) => (
               <li key={f.key} className="flex items-center gap-3 text-sm">
