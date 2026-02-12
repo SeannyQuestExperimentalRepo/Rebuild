@@ -52,7 +52,9 @@ export default function UpcomingGamesSidebar() {
   const sportsWithGames = useMemo(() => {
     const sports = new Set<string>();
     for (const g of games) {
-      if (g.gameDate.startsWith(todayET)) sports.add(g.sport);
+      // Convert UTC gameDate to ET date for comparison (evening ET games are next-day UTC)
+      const gameET = new Date(g.gameDate).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+      if (gameET === todayET) sports.add(g.sport);
     }
     return Array.from(sports);
   }, [games, todayET]);

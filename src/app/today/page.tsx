@@ -7,7 +7,17 @@ import { TrackRecordBar } from "@/components/picks/track-record-bar";
 import { GamePickCard } from "@/components/picks/game-pick-card";
 import { PropPickCard } from "@/components/picks/prop-pick-card";
 
-const SPORTS = ["NFL", "NCAAF", "NCAAMB"] as const;
+const SPORTS = ["NCAAMB", "NFL", "NCAAF"] as const;
+
+/** Pick the sport most likely to have games today */
+function defaultSport(): string {
+  const m = new Date().getMonth(); // 0-indexed
+  // Nov–Mar: college basketball season
+  if (m >= 10 || m <= 2) return "NCAAMB";
+  // Sep–Jan: college/pro football overlap
+  if (m >= 8) return "NFL";
+  return "NFL";
+}
 
 function todayET(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
@@ -24,7 +34,7 @@ function formatDate(date: string): string {
 }
 
 export default function TodayPage() {
-  const [sport, setSport] = useState<string>("NFL");
+  const [sport, setSport] = useState<string>(defaultSport);
   const date = todayET();
 
   const { data: picksData, isLoading, error: picksError } = useDailyPicks(sport, date);
