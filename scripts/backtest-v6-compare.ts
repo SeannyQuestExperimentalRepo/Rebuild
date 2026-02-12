@@ -30,6 +30,7 @@ interface BacktestConfig {
   hcaMode: "flat" | "context";
   adjOEModifier: boolean;
   marketEdge: boolean;
+  ouMode?: "thresholds" | "regression"; // v7: OLS regression for O/U
   // Tunable thresholds for sensitivity analysis
   hcaConf?: number;      // Conference HCA (default 2.5)
   hcaNonConf?: number;   // Non-conference HCA (default 1.5)
@@ -52,6 +53,14 @@ const V6_CONFIG: BacktestConfig = {
   hcaMode: "context",
   adjOEModifier: true,
   marketEdge: true,
+};
+
+const V7_CONFIG: BacktestConfig = {
+  name: "v7 (regression O/U + context HCA + ML edge)",
+  hcaMode: "context",
+  adjOEModifier: false, // regression captures AdjOE effect
+  marketEdge: true,
+  ouMode: "regression",
 };
 
 // ─── PIT Ratings ─────────────────────────────────────────────────────────────
@@ -285,6 +294,97 @@ function computeKenPomOUSignal(
     category: "modelEdge", direction: dir, magnitude: mag, confidence: conf,
     label: `O/U sumDE=${sumAdjDE.toFixed(1)}`,
     strength: mag >= 6 ? "strong" : mag >= 3 ? "moderate" : mag >= 1 ? "weak" : "noise",
+  };
+}
+
+function computeKenPomOUSignalV7(
+  ratings: Map<string, KenpomRating> | null,
+  homeTeam: string, awayTeam: string,
+  overUnder: number, gameDate: Date,
+  game: GameRecord,
+): SignalResult {
+  const neutral: SignalResult = {
+    category: "modelEdge", direction: "neutral",
+    magnitude: 0, confidence: 0, label: "No KenPom", strength: "noise",
+  };
+  if (!ratings) return neutral;
+  const homeR = lookupRating(ratings, homeTeam);
+  const awayR = lookupRating(ratings, awayTeam);
+  if (!homeR || !awayR) return neutral;
+
+  const sumAdjDE = homeR.AdjDE + awayR.AdjDE;
+  const sumAdjOE = homeR.AdjOE + awayR.AdjOE;
+  const avgTempo = (homeR.AdjTempo + awayR.AdjTempo) / 2;
+  const tempoDiff = Math.abs(homeR.AdjTempo - awayR.AdjTempo);
+  const emAbsDiff = Math.abs(homeR.AdjEM - awayR.AdjEM);
+  const isConf = homeR.ConfShort === awayR.ConfShort ? 1 : 0;
+  const fmTotal = (game.fmHomeWinProb != null) ? 0 : 0; // FanMatch total not stored on GameRecord, use 0
+  const gameMonth = gameDate.getMonth() + 1;
+
+  // OLS Model A coefficients (trained on 2025 walk-forward Fold 3)
+  const predictedTotal =
+    -418.2117 +
+    0.6390 * sumAdjDE +
+    0.6115 * sumAdjOE +
+    4.3646 * avgTempo +
+    -0.0177 * tempoDiff +
+    -0.0078 * emAbsDiff +
+    -1.4343 * isConf +
+    0.0203 * fmTotal;
+
+  const edge = predictedTotal - overUnder;
+  let ouDir: "over" | "under" | "neutral" = "neutral";
+  let ouMag = 0;
+  let ouConf = 0;
+
+  // Edge-to-magnitude mapping (matches pick-engine.ts)
+  const absEdge = Math.abs(edge);
+  if (absEdge >= 10) { ouMag = 10; ouConf = 0.93; }
+  else if (absEdge >= 7) { ouMag = 9; ouConf = 0.90; }
+  else if (absEdge >= 5) { ouMag = 8; ouConf = 0.85; }
+  else if (absEdge >= 3) { ouMag = 6; ouConf = 0.75; }
+  else if (absEdge >= 2) { ouMag = 5; ouConf = 0.65; }
+  else if (absEdge >= 1.5) { ouMag = 3; ouConf = 0.55; }
+
+  if (absEdge >= 1.5) {
+    ouDir = edge > 0 ? "over" : "under";
+  }
+
+  // Contextual overrides (same as pick-engine.ts)
+  const powerConfs = ["BE", "B12", "B10", "SEC", "ACC", "P12"];
+  const homeIsPower = powerConfs.includes(homeR.ConfShort ?? "");
+  const awayIsPower = powerConfs.includes(awayR.ConfShort ?? "");
+
+  if (homeR.RankAdjEM <= 50 && awayR.RankAdjEM <= 50) {
+    ouDir = "under"; ouMag = 10; ouConf = 0.95;
+  } else if (homeIsPower && awayIsPower) {
+    if (ouDir === "under") ouMag = Math.min(ouMag + 2, 10);
+    else if (ouDir === "neutral" || ouDir === "over") { ouDir = "under"; ouMag = Math.max(ouMag, 6); ouConf = Math.max(ouConf, 0.82); }
+  }
+
+  if (homeR.RankAdjEM > 200 && awayR.RankAdjEM > 200) {
+    if (ouDir === "over") ouMag = Math.min(ouMag + 1, 10);
+    else if (ouDir === "neutral") { ouDir = "over"; ouMag = Math.max(ouMag, 5); ouConf = Math.max(ouConf, 0.78); }
+  }
+
+  if (gameMonth === 3) {
+    if (ouDir === "under") ouMag = Math.min(ouMag + 1, 10);
+    else if (ouDir === "neutral") { ouDir = "under"; ouMag = 3; ouConf = Math.max(ouConf, 0.60); }
+  }
+
+  if (overUnder >= 160) { ouDir = "under"; ouMag = Math.max(ouMag, 8); ouConf = Math.max(ouConf, 0.88); }
+  else if (overUnder >= 155) { ouDir = "under"; ouMag = Math.max(ouMag, 6); ouConf = Math.max(ouConf, 0.82); }
+
+  if (overUnder < 135) {
+    if (ouDir === "over") { ouMag = Math.min(ouMag + 2, 10); ouConf = Math.min(ouConf + 0.05, 1.0); }
+    else if (ouDir === "neutral") { ouDir = "over"; ouMag = 4; ouConf = Math.max(ouConf, 0.70); }
+  }
+
+  ouMag = clamp(ouMag, 0, 10);
+  return {
+    category: "modelEdge", direction: ouDir, magnitude: ouMag, confidence: ouConf,
+    label: `O/U regression pred=${predictedTotal.toFixed(1)} (edge ${edge > 0 ? "+" : ""}${edge.toFixed(1)})`,
+    strength: ouMag >= 6 ? "strong" : ouMag >= 3 ? "moderate" : ouMag >= 1 ? "weak" : "noise",
   };
 }
 
@@ -621,8 +721,11 @@ async function runSingle(
 
         // O/U
         if (game.overUnder !== null && game.ouResult) {
+          const ouModelSignal = config.ouMode === "regression"
+            ? computeKenPomOUSignalV7(kenpomRatings, home, away, game.overUnder, game.gameDate, game)
+            : computeKenPomOUSignal(kenpomRatings, home, away, game.overUnder, game.gameDate, config);
           const ouSignals: SignalResult[] = [
-            computeKenPomOUSignal(kenpomRatings, home, away, game.overUnder, game.gameDate, config),
+            ouModelSignal,
             signalSeasonOU(homeStats, awayStats),
             signalRecentFormOU(homeStats, awayStats),
             signalH2HOU(allHistoricalGames, home, away, game.overUnder),
@@ -704,6 +807,32 @@ function printComparison(v5: RunSummary, v6: RunSummary) {
   for (const [label, v5Val, v6Val] of rows) {
     if (label === "") { console.log(""); continue; }
     console.log(`${label.padEnd(18)} ${v5Val.padStart(W)} ${v6Val.padStart(W)}`);
+  }
+  console.log(line);
+}
+
+function printV7Comparison(v6: RunSummary, v7: RunSummary) {
+  const W = 45;
+  const line = "─".repeat(W * 2 + 20);
+  console.log(`\n${line}`);
+  console.log(`${"".padEnd(18)} ${"v6".padStart(W)} ${"v7 (regression O/U)".padStart(W)}`);
+  console.log(line);
+
+  const rows: [string, string, string][] = [
+    ["Total Picks", String(v6.total), String(v7.total)],
+    ["", "", ""],
+    ["SPREAD (all)", fmtRecord(v6.spreadWins, v6.spreadLosses, v6.spreadPushes), fmtRecord(v7.spreadWins, v7.spreadLosses, v7.spreadPushes)],
+    ["  4★ SPREAD", fmtRecord(v6.star4Spread.w, v6.star4Spread.l, v6.star4Spread.p), fmtRecord(v7.star4Spread.w, v7.star4Spread.l, v7.star4Spread.p)],
+    ["  5★ SPREAD", fmtRecord(v6.star5Spread.w, v6.star5Spread.l, v6.star5Spread.p), fmtRecord(v7.star5Spread.w, v7.star5Spread.l, v7.star5Spread.p)],
+    ["", "", ""],
+    ["O/U (all)", fmtRecord(v6.ouWins, v6.ouLosses, v6.ouPushes), fmtRecord(v7.ouWins, v7.ouLosses, v7.ouPushes)],
+    ["  4★ O/U", fmtRecord(v6.star4OU.w, v6.star4OU.l, v6.star4OU.p), fmtRecord(v7.star4OU.w, v7.star4OU.l, v7.star4OU.p)],
+    ["  5★ O/U", fmtRecord(v6.star5OU.w, v6.star5OU.l, v6.star5OU.p), fmtRecord(v7.star5OU.w, v7.star5OU.l, v7.star5OU.p)],
+  ];
+
+  for (const [label, v6Val, v7Val] of rows) {
+    if (label === "") { console.log(""); continue; }
+    console.log(`${label.padEnd(18)} ${v6Val.padStart(W)} ${v7Val.padStart(W)}`);
   }
   console.log(line);
 }
@@ -852,7 +981,7 @@ async function main() {
     getRatings = () => staticRatings;
   }
 
-  // Run v5 vs v6 comparison
+  // Run v5 vs v6 vs v7 comparison
   console.log("\nRunning v5 backtest...");
   const v5 = await runSingle(V5_CONFIG, allGames, priorGames, getRatings);
   console.log(`  v5: ${v5.results.length} picks generated`);
@@ -861,32 +990,36 @@ async function main() {
   const v6 = await runSingle(V6_CONFIG, allGames, priorGames, getRatings);
   console.log(`  v6: ${v6.results.length} picks generated`);
 
+  console.log("Running v7 backtest...");
+  const v7 = await runSingle(V7_CONFIG, allGames, priorGames, getRatings);
+  console.log(`  v7: ${v7.results.length} picks generated`);
+
   // Print comparison
   printComparison(v5.summary, v6.summary);
+  printV7Comparison(v6.summary, v7.summary);
 
   // Summary
-  const v5SpreadDecided = v5.summary.spreadWins + v5.summary.spreadLosses;
   const v6SpreadDecided = v6.summary.spreadWins + v6.summary.spreadLosses;
-  const v5SpreadPct = v5SpreadDecided > 0 ? (v5.summary.spreadWins / v5SpreadDecided * 100) : 0;
+  const v7SpreadDecided = v7.summary.spreadWins + v7.summary.spreadLosses;
   const v6SpreadPct = v6SpreadDecided > 0 ? (v6.summary.spreadWins / v6SpreadDecided * 100) : 0;
-  const spreadDelta = v6SpreadPct - v5SpreadPct;
+  const v7SpreadPct = v7SpreadDecided > 0 ? (v7.summary.spreadWins / v7SpreadDecided * 100) : 0;
 
-  const v5OUDecided = v5.summary.ouWins + v5.summary.ouLosses;
   const v6OUDecided = v6.summary.ouWins + v6.summary.ouLosses;
-  const v5OUPct = v5OUDecided > 0 ? (v5.summary.ouWins / v5OUDecided * 100) : 0;
+  const v7OUDecided = v7.summary.ouWins + v7.summary.ouLosses;
   const v6OUPct = v6OUDecided > 0 ? (v6.summary.ouWins / v6OUDecided * 100) : 0;
-  const ouDelta = v6OUPct - v5OUPct;
+  const v7OUPct = v7OUDecided > 0 ? (v7.summary.ouWins / v7OUDecided * 100) : 0;
+  const ouDelta = v7OUPct - v6OUPct;
 
   console.log("\n=== VERDICT ===");
-  console.log(`Spread: v6 is ${spreadDelta >= 0 ? "+" : ""}${spreadDelta.toFixed(1)}% vs v5`);
-  console.log(`O/U:    v6 is ${ouDelta >= 0 ? "+" : ""}${ouDelta.toFixed(1)}% vs v5`);
+  console.log(`Spread: v7 is ${(v7SpreadPct - v6SpreadPct) >= 0 ? "+" : ""}${(v7SpreadPct - v6SpreadPct).toFixed(1)}% vs v6`);
+  console.log(`O/U:    v7 is ${ouDelta >= 0 ? "+" : ""}${ouDelta.toFixed(1)}% vs v6`);
 
-  if (spreadDelta > 0 && ouDelta > 0) {
-    console.log("\nv6 improvements are ADDITIVE — both HCA and AdjOE help.");
-  } else if (spreadDelta < -1 || ouDelta < -1) {
-    console.log("\nWARNING: v6 regresses. Consider reverting affected signals.");
+  if (ouDelta > 2) {
+    console.log("\nv7 regression O/U is a clear improvement over v6 sumAdjDE thresholds.");
+  } else if (ouDelta > 0) {
+    console.log("\nv7 regression O/U is modestly better than v6.");
   } else {
-    console.log("\nv6 changes are roughly neutral. Consider keeping for theoretical correctness.");
+    console.log("\nWARNING: v7 regression does not improve O/U. Review coefficients.");
   }
 
   // Sensitivity analysis

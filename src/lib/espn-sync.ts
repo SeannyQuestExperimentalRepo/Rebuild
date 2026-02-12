@@ -389,6 +389,80 @@ export async function syncCompletedGames(
   return { sport, fetched: games.length, inserted, skipped };
 }
 
+// ─── KenPom Enrichment ──────────────────────────────────────────────────────
+
+/**
+ * Enrich NCAAMB games that are missing KenPom season ratings.
+ * Fetches current KenPom ratings and updates NCAAMBGame rows where
+ * homeAdjEM is null. Idempotent — safe to run multiple times.
+ */
+export async function enrichNCAAMBGamesWithKenpom(
+  season?: number,
+): Promise<{ enriched: number; notMatched: number }> {
+  const { getKenpomRatings, lookupRating } = await import("./kenpom");
+
+  const targetSeason = season ?? getSeason(new Date(), "NCAAMB");
+  const ratings = await getKenpomRatings(targetSeason);
+  if (!ratings || ratings.size === 0) {
+    console.log(`[KenPom Enrich] No ratings available for season ${targetSeason}`);
+    return { enriched: 0, notMatched: 0 };
+  }
+
+  // Find games missing KenPom data
+  const games = await prisma.nCAAMBGame.findMany({
+    where: {
+      season: targetSeason,
+      homeAdjEM: null,
+    },
+    select: {
+      id: true,
+      homeTeam: { select: { name: true } },
+      awayTeam: { select: { name: true } },
+    },
+  });
+
+  if (games.length === 0) {
+    console.log(`[KenPom Enrich] No games need enrichment for season ${targetSeason}`);
+    return { enriched: 0, notMatched: 0 };
+  }
+
+  let enriched = 0;
+  let notMatched = 0;
+
+  for (const game of games) {
+    const homeR = lookupRating(ratings, game.homeTeam.name);
+    const awayR = lookupRating(ratings, game.awayTeam.name);
+
+    if (!homeR || !awayR) {
+      notMatched++;
+      continue;
+    }
+
+    await prisma.nCAAMBGame.update({
+      where: { id: game.id },
+      data: {
+        homeKenpomRank: homeR.RankAdjEM,
+        awayKenpomRank: awayR.RankAdjEM,
+        homeAdjEM: homeR.AdjEM,
+        awayAdjEM: awayR.AdjEM,
+        homeAdjOE: homeR.AdjOE,
+        awayAdjOE: awayR.AdjOE,
+        homeAdjDE: homeR.AdjDE,
+        awayAdjDE: awayR.AdjDE,
+        homeAdjTempo: homeR.AdjTempo,
+        awayAdjTempo: awayR.AdjTempo,
+        isConferenceGame: homeR.ConfShort === awayR.ConfShort,
+      },
+    });
+    enriched++;
+  }
+
+  console.log(
+    `[KenPom Enrich] Season ${targetSeason}: enriched=${enriched}, notMatched=${notMatched}, total=${games.length}`,
+  );
+  return { enriched, notMatched };
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /** Calculate spread result from HOME perspective. Exported for future use. */

@@ -509,11 +509,11 @@ function computeKenPomEdge(
     } else if (absEdge >= 2) {
       ouDir = edge > 0 ? "over" : "under";
       ouMag = 5; ouConf = 0.65;
-    } else if (absEdge >= 1) {
+    } else if (absEdge >= 1.5) {
       ouDir = edge > 0 ? "over" : "under";
       ouMag = 3; ouConf = 0.55;
     } else {
-      // |edge| < 1: too close to call
+      // |edge| < 1.5: too close to call (tightened from 1.0 — v7 backtest showed marginal edges dilute quality)
       labelParts.push(`regression pred=${predictedTotal.toFixed(1)} (edge ${edge > 0 ? "+" : ""}${edge.toFixed(1)}, neutral)`);
     }
 

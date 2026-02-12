@@ -194,6 +194,27 @@ export async function POST(request: NextRequest) {
       results.backfill_NCAAMB = { error: "Unknown error" };
     }
 
+    // 2.6. Enrich NCAAMB games with KenPom season ratings
+    // KenPom AdjEM/AdjOE/AdjDE/AdjTempo are not captured at game creation time.
+    // This step backfills any NCAAMBGame rows missing KenPom data.
+    try {
+      const enrichResult = await Sentry.startSpan(
+        { name: "cron.kenpom_enrich.NCAAMB", op: "cron.step" },
+        async () => {
+          const { enrichNCAAMBGamesWithKenpom } = await import("@/lib/espn-sync");
+          return enrichNCAAMBGamesWithKenpom();
+        },
+      );
+      results.kenpom_enrich_NCAAMB = enrichResult;
+      console.log(
+        `[Cron] KenPom enrich: enriched=${enrichResult.enriched}, notMatched=${enrichResult.notMatched}`,
+      );
+    } catch (err) {
+      Sentry.captureException(err, { tags: { cronStep: "kenpom_enrich", sport: "NCAAMB" } });
+      console.error("[Cron] KenPom enrichment failed:", err);
+      results.kenpom_enrich_NCAAMB = { error: "Unknown error" };
+    }
+
     // 3. Pre-generate today's daily picks for all sports
     // Done here (after odds refresh) so picks are ready before users check
     {
