@@ -95,59 +95,62 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     if (limited) return limited;
 
     const { id } = await context.params;
-    const existing = await prisma.bet.findFirst({
-      where: { id, userId: session.user.id },
+    const body = (await req.json()) as PatchBody;
+
+    // Use transaction to prevent TOCTOU race condition
+    const updated = await prisma.$transaction(async (tx) => {
+      const existing = await tx.bet.findFirst({
+        where: { id, userId: session.user.id },
+      });
+
+      if (!existing) return null;
+
+      const updateData: Record<string, unknown> = {};
+
+      if (body.result && VALID_RESULTS.includes(body.result)) {
+        updateData.result = body.result;
+        const stake = body.stake ?? existing.stake;
+        const odds = body.oddsValue ?? existing.oddsValue;
+        updateData.profit = calculateProfit(stake, odds, body.result);
+        updateData.gradedAt = body.result !== "PENDING" ? new Date() : null;
+      }
+      if (body.notes !== undefined) updateData.notes = body.notes;
+      if (body.stake !== undefined && body.stake > 0) {
+        updateData.stake = body.stake;
+        const odds = body.oddsValue ?? existing.oddsValue;
+        updateData.toWin =
+          Math.round(body.stake * oddsToPayoutMultiplier(odds) * 100) / 100;
+      }
+      if (body.oddsValue !== undefined) {
+        updateData.oddsValue = body.oddsValue;
+        const stake = body.stake ?? existing.stake;
+        updateData.toWin =
+          Math.round(stake * oddsToPayoutMultiplier(body.oddsValue) * 100) / 100;
+      }
+      if (body.sportsbook !== undefined) updateData.sportsbook = body.sportsbook;
+      if (body.line !== undefined) updateData.line = body.line;
+
+      // Recalculate profit if stake/odds changed on an already-graded bet
+      const effectiveResult = (updateData.result as BetResult) ?? existing.result;
+      if (
+        effectiveResult !== "PENDING" &&
+        !updateData.profit &&
+        (body.stake !== undefined || body.oddsValue !== undefined)
+      ) {
+        const stake = (updateData.stake as number) ?? existing.stake;
+        const odds = (updateData.oddsValue as number) ?? existing.oddsValue;
+        updateData.profit = calculateProfit(stake, odds, effectiveResult);
+      }
+
+      return tx.bet.update({ where: { id }, data: updateData });
     });
 
-    if (!existing) {
+    if (!updated) {
       return NextResponse.json(
         { success: false, error: "Bet not found" },
         { status: 404 },
       );
     }
-
-    const body = (await req.json()) as PatchBody;
-    const updateData: Record<string, unknown> = {};
-
-    if (body.result && VALID_RESULTS.includes(body.result)) {
-      updateData.result = body.result;
-      const stake = body.stake ?? existing.stake;
-      const odds = body.oddsValue ?? existing.oddsValue;
-      updateData.profit = calculateProfit(stake, odds, body.result);
-      updateData.gradedAt = body.result !== "PENDING" ? new Date() : null;
-    }
-    if (body.notes !== undefined) updateData.notes = body.notes;
-    if (body.stake !== undefined && body.stake > 0) {
-      updateData.stake = body.stake;
-      const odds = body.oddsValue ?? existing.oddsValue;
-      updateData.toWin =
-        Math.round(body.stake * oddsToPayoutMultiplier(odds) * 100) / 100;
-    }
-    if (body.oddsValue !== undefined) {
-      updateData.oddsValue = body.oddsValue;
-      const stake = body.stake ?? existing.stake;
-      updateData.toWin =
-        Math.round(stake * oddsToPayoutMultiplier(body.oddsValue) * 100) / 100;
-    }
-    if (body.sportsbook !== undefined) updateData.sportsbook = body.sportsbook;
-    if (body.line !== undefined) updateData.line = body.line;
-
-    // Recalculate profit if stake/odds changed on an already-graded bet
-    const effectiveResult = (updateData.result as BetResult) ?? existing.result;
-    if (
-      effectiveResult !== "PENDING" &&
-      !updateData.profit &&
-      (body.stake !== undefined || body.oddsValue !== undefined)
-    ) {
-      const stake = (updateData.stake as number) ?? existing.stake;
-      const odds = (updateData.oddsValue as number) ?? existing.oddsValue;
-      updateData.profit = calculateProfit(stake, odds, effectiveResult);
-    }
-
-    const updated = await prisma.bet.update({
-      where: { id },
-      data: updateData,
-    });
 
     return NextResponse.json({ success: true, bet: updated });
   } catch (error) {
@@ -175,18 +178,23 @@ export async function DELETE(_req: NextRequest, context: RouteContext) {
     if (limited) return limited;
 
     const { id } = await context.params;
-    const existing = await prisma.bet.findFirst({
-      where: { id, userId: session.user.id },
+
+    // Use transaction to prevent TOCTOU race condition
+    const deleted = await prisma.$transaction(async (tx) => {
+      const existing = await tx.bet.findFirst({
+        where: { id, userId: session.user.id },
+      });
+      if (!existing) return false;
+      await tx.bet.delete({ where: { id } });
+      return true;
     });
 
-    if (!existing) {
+    if (!deleted) {
       return NextResponse.json(
         { success: false, error: "Bet not found" },
         { status: 404 },
       );
     }
-
-    await prisma.bet.delete({ where: { id } });
 
     return NextResponse.json({ success: true, deleted: true });
   } catch (error) {

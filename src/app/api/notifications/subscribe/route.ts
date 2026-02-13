@@ -28,6 +28,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Check if endpoint already belongs to another user (prevent hijacking)
+    const existing = await prisma.pushSubscription.findUnique({ where: { endpoint } });
+    if (existing && existing.userId !== session.user.id) {
+      return NextResponse.json(
+        { success: false, error: "Subscription conflict" },
+        { status: 409 },
+      );
+    }
+
     await prisma.pushSubscription.upsert({
       where: { endpoint },
       create: {
@@ -37,7 +46,7 @@ export async function POST(req: NextRequest) {
         auth: keys.auth,
       },
       update: {
-        userId: session.user.id,
+        // Only update keys — userId stays unchanged
         p256dh: keys.p256dh,
         auth: keys.auth,
       },

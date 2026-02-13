@@ -103,21 +103,8 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   });
 
   if (!user) {
-    // Fallback: check metadata for userId
-    const userId = session.metadata?.userId;
-    if (userId) {
-      await prisma.user.update({
-        where: { id: userId },
-        data: {
-          stripeCustomerId: customerId,
-          subscriptionId,
-          subscriptionStatus: "active",
-          role: "PREMIUM",
-        },
-      });
-      console.log(`[Stripe webhook] Activated subscription for user ${userId} (via metadata)`);
-      return;
-    }
+    // SECURITY: Do NOT fall back to metadata.userId — it's client-controllable
+    // and could be used to escalate privileges for arbitrary users.
     console.error("[Stripe webhook] No user found for customer:", customerId);
     return;
   }

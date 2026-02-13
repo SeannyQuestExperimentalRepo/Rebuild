@@ -281,35 +281,36 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
-    // Verify ownership
-    const existing = await prisma.bet.findFirst({
-      where: { id: body.id, userId: session.user.id },
+    // Use transaction to prevent TOCTOU race condition
+    const updated = await prisma.$transaction(async (tx) => {
+      const existing = await tx.bet.findFirst({
+        where: { id: body.id, userId: session.user.id },
+      });
+      if (!existing) return null;
+
+      const updateData: Record<string, unknown> = {};
+      if (body.result && VALID_RESULTS.includes(body.result)) {
+        updateData.result = body.result;
+        updateData.profit = calculateProfit(
+          existing.stake,
+          existing.oddsValue,
+          body.result,
+        );
+        updateData.gradedAt = body.result !== "PENDING" ? new Date() : null;
+      }
+      if (body.notes !== undefined) {
+        updateData.notes = body.notes;
+      }
+
+      return tx.bet.update({ where: { id: body.id }, data: updateData });
     });
-    if (!existing) {
+
+    if (!updated) {
       return NextResponse.json(
         { success: false, error: "Bet not found" },
         { status: 404 },
       );
     }
-
-    const updateData: Record<string, unknown> = {};
-    if (body.result && VALID_RESULTS.includes(body.result)) {
-      updateData.result = body.result;
-      updateData.profit = calculateProfit(
-        existing.stake,
-        existing.oddsValue,
-        body.result,
-      );
-      updateData.gradedAt = body.result !== "PENDING" ? new Date() : null;
-    }
-    if (body.notes !== undefined) {
-      updateData.notes = body.notes;
-    }
-
-    const updated = await prisma.bet.update({
-      where: { id: body.id },
-      data: updateData,
-    });
 
     return NextResponse.json({ success: true, bet: updated });
   } catch (error) {

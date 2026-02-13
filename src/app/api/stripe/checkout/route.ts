@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: `${origin}/pricing?success=true`,
       cancel_url: `${origin}/pricing?canceled=true`,
-      metadata: { userId: user.id },
+      // SECURITY: No metadata.userId — webhook uses stripeCustomerId lookup only
     });
 
     return NextResponse.json({
