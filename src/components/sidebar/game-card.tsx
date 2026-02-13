@@ -66,6 +66,17 @@ export default function GameCard({
   const isFinal = liveScore?.status === "final";
   const hasScore = isLive || isFinal;
 
+  // Final game derived data
+  const homeWon = isFinal && liveScore!.homeScore != null && liveScore!.awayScore != null
+    && liveScore!.homeScore > liveScore!.awayScore;
+  const awayWon = isFinal && liveScore!.homeScore != null && liveScore!.awayScore != null
+    && liveScore!.awayScore > liveScore!.homeScore;
+  const totalScore = isFinal && liveScore!.homeScore != null && liveScore!.awayScore != null
+    ? liveScore!.homeScore + liveScore!.awayScore
+    : null;
+  const wentOver = totalScore != null && overUnder != null && totalScore > overUnder;
+  const wentUnder = totalScore != null && overUnder != null && totalScore < overUnder;
+
   return (
     <Link
       href={gameUrl}
@@ -96,12 +107,16 @@ export default function GameCard({
       <div className="space-y-1.5">
         {/* Away team */}
         <div className="flex items-center justify-between">
-          <span className="truncate text-sm font-medium text-foreground/90 group-hover:text-foreground">
+          <span className={`truncate text-sm font-medium group-hover:text-foreground ${
+            isFinal
+              ? awayWon ? "text-foreground" : "text-muted-foreground/60"
+              : "text-foreground/90"
+          }`}>
             {awayRank ? <span className="text-primary/80">{formatRank(awayRank)}</span> : null}{awayTeam}
           </span>
           {hasScore ? (
             <span className={`ml-2 shrink-0 font-mono text-sm font-semibold tabular-nums ${
-              isLive ? "text-foreground" : "text-foreground/80"
+              isLive ? "text-foreground" : awayWon ? "text-foreground" : "text-muted-foreground/60"
             }`}>
               {liveScore?.awayScore ?? "—"}
             </span>
@@ -114,12 +129,16 @@ export default function GameCard({
 
         {/* Home team */}
         <div className="flex items-center justify-between">
-          <span className="truncate text-sm font-medium text-foreground/90 group-hover:text-foreground">
+          <span className={`truncate text-sm font-medium group-hover:text-foreground ${
+            isFinal
+              ? homeWon ? "text-foreground" : "text-muted-foreground/60"
+              : "text-foreground/90"
+          }`}>
             {homeRank ? <span className="text-primary/80">{formatRank(homeRank)}</span> : null}{homeTeam}
           </span>
           {hasScore ? (
             <span className={`ml-2 shrink-0 font-mono text-sm font-semibold tabular-nums ${
-              isLive ? "text-foreground" : "text-foreground/80"
+              isLive ? "text-foreground" : homeWon ? "text-foreground" : "text-muted-foreground/60"
             }`}>
               {liveScore?.homeScore ?? "—"}
             </span>
@@ -136,11 +155,23 @@ export default function GameCard({
         {overUnder != null && (
           <span className="font-mono text-[11px] text-muted-foreground/70">
             O/U {overUnder}
+            {isFinal && totalScore != null && (
+              <span className={wentOver ? "ml-1 font-semibold text-emerald-400" : wentUnder ? "ml-1 font-semibold text-red-400" : "ml-1"}>
+                {wentOver ? "O" : wentUnder ? "U" : "P"}
+              </span>
+            )}
           </span>
         )}
         {moneylineHome != null && moneylineAway != null && (
           <span className="ml-auto font-mono text-[11px] text-muted-foreground/70">
-            ML {formatML(moneylineAway)} / {formatML(moneylineHome)}
+            ML{" "}
+            <span className={isFinal && awayWon ? "font-semibold text-foreground" : ""}>
+              {formatML(moneylineAway)}
+            </span>
+            {" / "}
+            <span className={isFinal && homeWon ? "font-semibold text-foreground" : ""}>
+              {formatML(moneylineHome)}
+            </span>
           </span>
         )}
       </div>
