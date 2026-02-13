@@ -12,6 +12,7 @@ import type { Sport, BetType, BetResult } from "@prisma/client";
 import { authLimiter, applyRateLimit } from "@/lib/rate-limit";
 import { hasAccess } from "@/lib/subscription";
 import { features } from "@/lib/config";
+import { parseDateParam, validateDateRange } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -73,6 +74,12 @@ export async function GET(req: NextRequest) {
     const limit = Math.min(parseInt(searchParams.get("limit") || "50"), 200);
     const offset = parseInt(searchParams.get("offset") || "0");
 
+    // Validate date params
+    const dateError = validateDateRange(from, to);
+    if (dateError) {
+      return NextResponse.json({ success: false, error: dateError }, { status: 400 });
+    }
+
     // Build where clause
     const where: Record<string, unknown> = { userId: session.user.id };
     if (sport && VALID_SPORTS.includes(sport)) where.sport = sport;
@@ -80,8 +87,8 @@ export async function GET(req: NextRequest) {
     if (result && VALID_RESULTS.includes(result)) where.result = result;
     if (from || to) {
       where.gameDate = {};
-      if (from) (where.gameDate as Record<string, unknown>).gte = new Date(from);
-      if (to) (where.gameDate as Record<string, unknown>).lte = new Date(to);
+      if (from) (where.gameDate as Record<string, unknown>).gte = parseDateParam(from)!;
+      if (to) (where.gameDate as Record<string, unknown>).lte = parseDateParam(to)!;
     }
 
     const [bets, total] = await Promise.all([

@@ -33,8 +33,18 @@ export async function GET(request: NextRequest) {
     // Use start of today in Eastern Time so games align with the US sports calendar.
     // Without this, yesterday's 7 PM+ ET games bleed into "today" because they cross
     // UTC midnight (e.g. 7 PM ET = 00:00 UTC next day).
+    // Dynamically compute ET midnight in UTC (handles EST/EDT automatically).
     const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
-    const todayStart = new Date(todayStr + "T05:00:00Z"); // ET midnight ≈ 05:00 UTC (EST)
+    const etFormatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      timeZoneName: "shortOffset",
+    });
+    const parts = etFormatter.formatToParts(new Date());
+    const offsetStr = parts.find((p) => p.type === "timeZoneName")?.value ?? "GMT-5";
+    const offsetMatch = offsetStr.match(/GMT([+-]\d+)/);
+    const offsetHours = offsetMatch ? parseInt(offsetMatch[1], 10) : -5;
+    const todayStart = new Date(todayStr + "T00:00:00Z");
+    todayStart.setUTCHours(todayStart.getUTCHours() - offsetHours);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: Record<string, any> = {

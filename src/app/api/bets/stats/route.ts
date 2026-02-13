@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authLimiter, applyRateLimit } from "@/lib/rate-limit";
 import { auth } from "@/../../auth";
 import { prisma } from "@/lib/db";
+import { parseDateParam, validateDateRange } from "@/lib/utils";
 import type { Sport } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -79,12 +80,18 @@ export async function GET(req: NextRequest) {
     const from = searchParams.get("from");
     const to = searchParams.get("to");
 
+    // Validate date params
+    const dateError = validateDateRange(from, to);
+    if (dateError) {
+      return NextResponse.json({ success: false, error: dateError }, { status: 400 });
+    }
+
     const where: Record<string, unknown> = { userId: session.user.id };
     if (sport) where.sport = sport;
     if (from || to) {
       where.gameDate = {};
-      if (from) (where.gameDate as Record<string, unknown>).gte = new Date(from);
-      if (to) (where.gameDate as Record<string, unknown>).lte = new Date(to);
+      if (from) (where.gameDate as Record<string, unknown>).gte = parseDateParam(from)!;
+      if (to) (where.gameDate as Record<string, unknown>).lte = parseDateParam(to)!;
     }
 
     const bets = await prisma.bet.findMany({

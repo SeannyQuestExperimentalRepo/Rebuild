@@ -83,7 +83,7 @@ function stripRawFromGames(
   return games.map(({ _raw, ...rest }) => rest) as Omit<TrendGame, "_raw">[];
 }
 
-function formatResponse(result: TrendResult, durationMs: number) {
+function formatResponse(result: TrendResult, durationMs: number, method: "GET" | "POST" = "GET") {
   const trimmedGames = stripRawFromGames(
     result.games.slice(0, MAX_RESPONSE_GAMES),
   );
@@ -111,9 +111,12 @@ function formatResponse(result: TrendResult, durationMs: number) {
       gamesSearched: result.summary.totalGames,
     },
   });
+  // POST bodies aren't part of CDN cache keys, so use private cache for POST
   response.headers.set(
     "Cache-Control",
-    "s-maxage=300, stale-while-revalidate=3600",
+    method === "POST"
+      ? "private, max-age=300"
+      : "s-maxage=300, stale-while-revalidate=3600",
   );
   return response;
 }
@@ -157,7 +160,7 @@ export async function POST(request: NextRequest) {
     const result = await executeTrendQueryCached(query);
     const durationMs = timer();
     trackTiming({ route: "/api/trends", method: "POST", durationMs, sport: query.sport });
-    return formatResponse(result, durationMs);
+    return formatResponse(result, durationMs, "POST");
   } catch (err) {
     trackError(err, { route: "/api/trends", action: "POST" });
     return errorResponse(
