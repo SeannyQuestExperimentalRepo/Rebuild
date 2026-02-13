@@ -57,6 +57,7 @@ export function TrackRecordBar({ overall, byType, byConfidence }: TrackRecordBar
       {byType.PLAYER_PROP && <StatBox label="Props" bucket={byType.PLAYER_PROP} />}
       {byConfidence["5_star"] && <StatBox label="5-Star" bucket={byConfidence["5_star"]} />}
       {byConfidence["4_star"] && <StatBox label="4-Star" bucket={byConfidence["4_star"]} />}
+      {byConfidence["3_star"] && <StatBox label="3-Star" bucket={byConfidence["3_star"]} />}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 /**
- * Daily Pick Engine v8
+ * Daily Pick Engine v8.1
  *
  * Signal Convergence Scoring Model — generates daily betting picks by
  * evaluating 9 independent signal categories:
@@ -13,6 +13,15 @@
  *   7. Rest/B2B — schedule fatigue (NCAAMB)
  *   8. Tempo Differential — pace mismatch O/U signal (NCAAMB)
  *   9. Market Edge — KenPom WP vs moneyline implied probability (NCAAMB)
+ *
+ * v8.1 changes (604-iteration backtest):
+ *   - NCAAMB O/U: tier-based star assignment replaces convergence-gated stars
+ *   - 5★ Aggressive: UNDER + edge >= 2.0 + avgTempo <= 67 (75.7% OOS)
+ *   - 4★ Hybrid: UNDER edge >= 2.0 OR OVER line < 140 edge >= 5.0 (70.7% OOS)
+ *   - 3★ Base: edge >= 1.5 (63.3% OOS)
+ *   - Regression edge gates pick generation (not convergence score)
+ *   - Regression direction used for NCAAMB O/U (not multi-signal consensus)
+ *   - Non-NCAAMB O/U and all spread picks unchanged
  *
  * v8 changes:
  *   - O/U regression: OLS → Ridge (λ=1000) — reduces overfitting gap from 17.4pp to 4.3pp
@@ -41,8 +50,11 @@
  *   - Required minimum 3 active signals to generate a pick (+1.5% ROI)
  *
  * Confidence tiers:
- *   - 4★ (70-84): clear model edge + confirming angles
- *   - 5★ (85+): rare full convergence across 4+ categories
+ *   - 5★ NCAAMB O/U: Aggressive — UNDER, edge >= 2, slow tempo <= 67 (75.7%)
+ *   - 4★ NCAAMB O/U: Hybrid — UNDER e>=2 OR OVER line<140 e>=5 (70.7%)
+ *   - 3★ NCAAMB O/U: Base — edge >= 1.5 (63.3%)
+ *   - 5★ (other): convergence score >= 85
+ *   - 4★ (other): convergence score >= 70
  *
  * Also grades past picks after games complete.
  */
@@ -399,7 +411,7 @@ function computeKenPomEdge(
   overUnder: number | null,
   gameDate: Date,
   fanMatch: KenpomFanMatch[] | null = null,
-): { spread: SignalResult; ou: SignalResult } {
+): { spread: SignalResult; ou: SignalResult; ouMeta?: { absEdge: number; avgTempo: number; ouDir: "over" | "under" } } {
   const neutral: SignalResult = {
     category: "modelEdge",
     direction: "neutral",
@@ -492,6 +504,7 @@ function computeKenPomEdge(
   // OOS 2026: 65.7% accuracy (up from 52.2% in v7). Gap: 4.3pp (down from 17.4pp).
   // Coefficients from scripts/backtest/phase3-validation.ts.
   let ouSignal: SignalResult = { ...neutral };
+  let ouMeta: { absEdge: number; avgTempo: number; ouDir: "over" | "under" } | undefined;
   if (overUnder !== null) {
     const sumAdjDE = homeDE + awayDE;
     const sumAdjOE = homeRating.AdjOE + awayRating.AdjOE;
@@ -562,9 +575,13 @@ function computeKenPomEdge(
       label: `KenPom O/U: ${labelParts.join(" | ")}`,
       strength: finalMag >= 6 ? "strong" : finalMag >= 3 ? "moderate" : finalMag >= 1 ? "weak" : "noise",
     };
+
+    if (ouDir !== "neutral") {
+      ouMeta = { absEdge, avgTempo, ouDir: ouDir as "over" | "under" };
+    }
   }
 
-  return { spread: spreadSignal, ou: ouSignal };
+  return { spread: spreadSignal, ou: ouSignal, ouMeta };
 }
 
 // ─── Model Edge: Power Rating (NFL/NCAAF) ───────────────────────────────────
@@ -1683,8 +1700,9 @@ function buildOUHeadlineV3(
   score: number,
   signals: SignalResult[],
   direction: string,
+  confidenceOverride?: number,
 ): string {
-  const confidence = score >= 85 ? 5 : score >= 70 ? 4 : 3;
+  const confidence = confidenceOverride ?? (score >= 85 ? 5 : score >= 70 ? 4 : 3);
 
   const modelEdge = signals.find((s) => s.category === "modelEdge" && s.direction === direction);
   const weatherSignal = signals.find((s) => s.category === "h2hWeather" && s.direction === direction);
@@ -2116,12 +2134,39 @@ export async function generateDailyPicks(
 
             // v5: skip O/U convergence bonus + require min 3 active signals
             const result = computeConvergenceScore(ouSignals, sportWeightsOU, true, 3);
-            const confidence = result.score >= 85 ? 5 : result.score >= 70 ? 4 : 0;
+
+            // v8.1: NCAAMB O/U uses tier-based stars from 604-iteration backtest.
+            // Gate on regression edge (not convergence score) since backtest validated regression alone.
+            let confidence: number;
+            const ouMeta = (modelPrediction as { ouMeta?: { absEdge: number; avgTempo: number; ouDir: "over" | "under" } }).ouMeta;
+            if (sport === "NCAAMB" && ouMeta) {
+              const { absEdge, avgTempo, ouDir } = ouMeta;
+              const line = game.overUnder!;
+              if (ouDir === "under" && absEdge >= 2.0 && avgTempo <= 67) {
+                confidence = 5; // Aggressive: 75.7% OOS, ~0.6 picks/day
+              } else if (
+                (ouDir === "under" && absEdge >= 2.0) ||
+                (ouDir === "over" && line < 140 && absEdge >= 5.0)
+              ) {
+                confidence = 4; // Hybrid: 70.7% OOS, ~1.5 picks/day
+              } else if (absEdge >= 1.5) {
+                confidence = 3; // Base: 63.3% OOS, ~4 picks/day
+              } else {
+                confidence = 0;
+              }
+            } else {
+              confidence = result.score >= 85 ? 5 : result.score >= 70 ? 4 : 0;
+            }
 
             if (confidence === 0) {
               context.rejectedInsufficientSignals++;
             } else {
-              const label = result.direction === "over" ? "Over" : "Under";
+              // v8.1: For NCAAMB O/U, use regression direction (backtest-validated)
+              // instead of convergence direction (multi-signal consensus)
+              const pickDir = (sport === "NCAAMB" && ouMeta)
+                ? ouMeta.ouDir
+                : result.direction;
+              const label = pickDir === "over" ? "Over" : "Under";
 
               picks.push({
                 sport,
@@ -2129,7 +2174,7 @@ export async function generateDailyPicks(
                 homeTeam: game.homeTeam,
                 awayTeam: game.awayTeam,
                 gameDate: game.gameDate,
-                pickSide: result.direction,
+                pickSide: pickDir,
                 line: game.overUnder,
                 pickLabel: `${label} ${game.overUnder}`,
                 playerName: null,
@@ -2137,7 +2182,7 @@ export async function generateDailyPicks(
                 propLine: null,
                 trendScore: result.score,
                 confidence,
-                headline: buildOUHeadlineV3(label, game.overUnder, result.score, ouSignals, result.direction),
+                headline: buildOUHeadlineV3(label, game.overUnder!, result.score, ouSignals, pickDir, confidence),
                 reasoning: result.reasons,
                 homeRank: game.homeRank,
                 awayRank: game.awayRank,
