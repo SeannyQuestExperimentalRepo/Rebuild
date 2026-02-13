@@ -21,6 +21,17 @@ export default auth((req) => {
   const { nextUrl } = req;
   const isLoggedIn = !!req.auth;
 
+  // ── Site-wide password gate ──
+  // Set SITE_PASSWORD env var to require a password for all pages.
+  // Remove the env var to disable the gate entirely.
+  const sitePassword = process.env.SITE_PASSWORD;
+  if (sitePassword && nextUrl.pathname !== "/gate") {
+    const hasAccess = req.cookies.get("site_access")?.value === "granted";
+    if (!hasAccess) {
+      return NextResponse.redirect(new URL("/gate", nextUrl));
+    }
+  }
+
   // Set Sentry user context for authenticated requests
   if (isLoggedIn && req.auth?.user) {
     Sentry.setUser({
