@@ -28,6 +28,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (typeof endpoint !== "string" || endpoint.length > 2000) {
+      return NextResponse.json(
+        { success: false, error: "Invalid endpoint" },
+        { status: 400 },
+      );
+    }
+
     // Check if endpoint already belongs to another user (prevent hijacking)
     const existing = await prisma.pushSubscription.findUnique({ where: { endpoint } });
     if (existing && existing.userId !== session.user.id) {

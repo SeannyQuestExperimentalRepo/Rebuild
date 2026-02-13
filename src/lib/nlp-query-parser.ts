@@ -591,6 +591,21 @@ function detectPlayerQuery(query: string): ParsedQuery | null {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Prompt injection guard
+// ---------------------------------------------------------------------------
+
+const MAX_QUERY_LENGTH = 500;
+
+/** Patterns that look like prompt injection attempts */
+const INJECTION_PATTERNS =
+  /\[(SYSTEM|ADMIN|INSTRUCTION|IGNORE)\]|<\/?system>|<\/?instruction>|ignore previous|forget (?:your |all )?instructions|you are now|new instructions|disregard|override prompt/gi;
+
+/** Sanitize user input before sending to the LLM */
+function sanitizeQuery(query: string): string {
+  return query.slice(0, MAX_QUERY_LENGTH).replace(INJECTION_PATTERNS, "").trim();
+}
+
 /**
  * Parse a natural language betting trend query into a structured TrendQuery.
  *
@@ -604,25 +619,31 @@ export async function parseNaturalLanguageQuery(
   query: string,
 ): Promise<ParsedQuery> {
   try {
+    // Sanitize before any processing
+    const sanitized = sanitizeQuery(query);
+    if (!sanitized) {
+      return fallbackResult(query);
+    }
+
     // Check for prop query first (more specific than player query)
-    const propResult = detectPropQuery(query);
+    const propResult = detectPropQuery(sanitized);
     if (propResult) {
       return propResult;
     }
 
     // Check for player query
-    const playerResult = detectPlayerQuery(query);
+    const playerResult = detectPlayerQuery(sanitized);
     if (playerResult) {
       return playerResult;
     }
 
     // Attempt local parse for game-level queries
-    const localResult = parseQueryLocal(query);
+    const localResult = parseQueryLocal(sanitized);
     if (localResult) {
       return {
         trendQuery: localResult,
         queryType: "game" as const,
-        interpretation: buildLocalInterpretation(localResult, query),
+        interpretation: buildLocalInterpretation(localResult, sanitized),
         confidence: 0.75,
         suggestions: undefined,
       };
@@ -631,7 +652,7 @@ export async function parseNaturalLanguageQuery(
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       console.warn("[nlp-query-parser] No OPENAI_API_KEY — falling back");
-      return fallbackResult(query);
+      return fallbackResult(sanitized);
     }
 
     const { default: OpenAI } = await import("openai");
@@ -646,18 +667,18 @@ export async function parseNaturalLanguageQuery(
         { role: "system", content: SYSTEM_PROMPT },
         {
           role: "user",
-          content: `Parse this betting trend query into a structured TrendQuery:\n\n"${query}"`,
+          content: `Parse this betting trend query into a structured TrendQuery:\n\n"${sanitized}"`,
         },
       ],
     });
 
     const content = response.choices[0]?.message?.content;
     if (!content) {
-      return fallbackResult(query);
+      return fallbackResult(sanitized);
     }
 
     const parsed = JSON.parse(content);
-    return validateAndNormalize(parsed, query);
+    return validateAndNormalize(parsed, sanitized);
   } catch (error) {
     console.error("[nlp-query-parser] OpenAI parse failed:", error);
     return fallbackResult(query);

@@ -13,6 +13,7 @@ import type { BetResult } from "@prisma/client";
 export const dynamic = "force-dynamic";
 
 const VALID_RESULTS: BetResult[] = ["WIN", "LOSS", "PUSH", "PENDING"];
+const MAX_NOTES_LENGTH = 1000;
 
 function oddsToPayoutMultiplier(odds: number): number {
   if (odds >= 100) return odds / 100;
@@ -114,7 +115,11 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
         updateData.profit = calculateProfit(stake, odds, body.result);
         updateData.gradedAt = body.result !== "PENDING" ? new Date() : null;
       }
-      if (body.notes !== undefined) updateData.notes = body.notes;
+      if (body.notes !== undefined) {
+        updateData.notes = typeof body.notes === "string"
+          ? body.notes.slice(0, MAX_NOTES_LENGTH)
+          : body.notes;
+      }
       if (body.stake !== undefined && body.stake > 0) {
         updateData.stake = body.stake;
         const odds = body.oddsValue ?? existing.oddsValue;

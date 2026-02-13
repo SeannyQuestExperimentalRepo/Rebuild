@@ -140,7 +140,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error("[admin/actions]", err);
     return NextResponse.json(
-      { success: false, error: err instanceof Error ? err.message : "Unknown error" },
+      { success: false, error: "Action failed" },
       { status: 500 },
     );
   }

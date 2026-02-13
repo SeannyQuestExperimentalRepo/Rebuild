@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/../../auth";
 import { prisma } from "@/lib/db";
 import { authLimiter, applyRateLimit } from "@/lib/rate-limit";
+import { TrendQuerySchema } from "@/app/api/trends/route";
 import type { Sport } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -60,6 +61,9 @@ export async function GET(req: NextRequest) {
 
 // ─── POST: Save a new trend ──────────────────────────────────────────────────
 
+const MAX_NAME_LENGTH = 100;
+const MAX_DESCRIPTION_LENGTH = 500;
+
 interface SaveTrendBody {
   name: string;
   sport: string;
@@ -90,6 +94,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (body.name.trim().length > MAX_NAME_LENGTH) {
+      return NextResponse.json(
+        { success: false, error: `Name must be ${MAX_NAME_LENGTH} characters or less` },
+        { status: 400 },
+      );
+    }
+
+    if (body.description && body.description.trim().length > MAX_DESCRIPTION_LENGTH) {
+      return NextResponse.json(
+        { success: false, error: `Description must be ${MAX_DESCRIPTION_LENGTH} characters or less` },
+        { status: 400 },
+      );
+    }
+
     if (!body.sport || !VALID_SPORTS.includes(body.sport.toUpperCase())) {
       return NextResponse.json(
         { success: false, error: "Valid sport is required" },
@@ -100,6 +118,15 @@ export async function POST(req: NextRequest) {
     if (!body.query || typeof body.query !== "object") {
       return NextResponse.json(
         { success: false, error: "Query object is required" },
+        { status: 400 },
+      );
+    }
+
+    // Validate the query against TrendQuerySchema to prevent arbitrary JSON storage
+    const queryValidation = TrendQuerySchema.safeParse(body.query);
+    if (!queryValidation.success) {
+      return NextResponse.json(
+        { success: false, error: "Invalid query structure" },
         { status: 400 },
       );
     }
