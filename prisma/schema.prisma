@@ -582,6 +582,8 @@ model DailyPick {
   confidence  Int      // 3, 4, or 5
   headline    String
   reasoning   Json     // [{angle, weight, strength, record}]
+  homeRank    Int?
+  awayRank    Int?
   result      String   @default("PENDING") // WIN, LOSS, PUSH, PENDING
   actualValue Float?
   gradedAt    DateTime?

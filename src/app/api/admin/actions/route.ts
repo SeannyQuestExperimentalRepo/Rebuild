@@ -86,6 +86,8 @@ export async function POST(req: NextRequest) {
               confidence: p.confidence,
               headline: p.headline,
               reasoning: p.reasoning as unknown as import("@prisma/client").Prisma.InputJsonValue,
+              homeRank: p.homeRank,
+              awayRank: p.awayRank,
             })),
             skipDuplicates: true,
           });

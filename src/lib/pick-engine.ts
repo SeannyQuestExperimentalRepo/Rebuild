@@ -73,6 +73,8 @@ export interface GeneratedPick {
   confidence: number;
   headline: string;
   reasoning: ReasoningEntry[];
+  homeRank: number | null;
+  awayRank: number | null;
 }
 
 interface SignalResult {
@@ -1961,6 +1963,8 @@ async function discoverProps(
             confidence,
             headline: `${result.overall.hitRate}% hit rate (${result.overall.hits}/${result.overall.total}) — ${(wilsonLower * 100).toFixed(0)}% floor vs ${opponent}`,
             reasoning,
+            homeRank: null,
+            awayRank: null,
           });
         } catch (err) {
           console.warn(`[pick-engine] Prop query failed for ${player.playerName} ${stat}:`, err);
@@ -2133,6 +2137,8 @@ export async function generateDailyPicks(
                 confidence,
                 headline: buildHeadlineV3(teamName, spreadVal, result.score, spreadSignals, result.direction),
                 reasoning: result.reasons,
+                homeRank: game.homeRank,
+                awayRank: game.awayRank,
               });
             }
           }
@@ -2181,6 +2187,8 @@ export async function generateDailyPicks(
                 confidence,
                 headline: buildOUHeadlineV3(label, game.overUnder, result.score, ouSignals, result.direction),
                 reasoning: result.reasons,
+                homeRank: game.homeRank,
+                awayRank: game.awayRank,
               });
             }
           }
@@ -2193,7 +2201,7 @@ export async function generateDailyPicks(
             game.gameDate,
             currentSeason,
           );
-          picks.push(...propPicks);
+          picks.push(...propPicks.map(p => ({ ...p, homeRank: game.homeRank, awayRank: game.awayRank })));
           context.gamesProcessed++;
         } catch (err) {
           context.gamesErrored++;
