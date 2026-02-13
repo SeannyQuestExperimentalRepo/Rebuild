@@ -73,6 +73,7 @@ export async function GET(req: NextRequest) {
     const to = searchParams.get("to");
     const limit = Math.min(parseInt(searchParams.get("limit") || "50"), 200);
     const offset = parseInt(searchParams.get("offset") || "0");
+    const cursor = searchParams.get("cursor"); // cursor-based pagination (bet ID)
 
     // Validate date params
     const dateError = validateDateRange(from, to);
@@ -91,27 +92,49 @@ export async function GET(req: NextRequest) {
       if (to) (where.gameDate as Record<string, unknown>).lte = parseDateParam(to)!;
     }
 
+    const selectFields = {
+      id: true,
+      sport: true,
+      betType: true,
+      gameDate: true,
+      homeTeam: true,
+      awayTeam: true,
+      pickSide: true,
+      line: true,
+      oddsValue: true,
+      stake: true,
+      result: true,
+      profit: true,
+      createdAt: true,
+    };
+
+    if (cursor) {
+      // Cursor-based pagination (faster for large datasets)
+      const bets = await prisma.bet.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        take: limit,
+        skip: 1,
+        cursor: { id: cursor },
+        select: selectFields,
+      });
+
+      const nextCursor = bets.length === limit ? bets[bets.length - 1].id : null;
+      return NextResponse.json({
+        success: true,
+        bets,
+        pagination: { nextCursor, limit, hasMore: nextCursor !== null },
+      });
+    }
+
+    // Offset-based pagination (backwards compatible)
     const [bets, total] = await Promise.all([
       prisma.bet.findMany({
         where,
         orderBy: { createdAt: "desc" },
         take: limit,
         skip: offset,
-        select: {
-          id: true,
-          sport: true,
-          betType: true,
-          gameDate: true,
-          homeTeam: true,
-          awayTeam: true,
-          pickSide: true,
-          line: true,
-          oddsValue: true,
-          stake: true,
-          result: true,
-          profit: true,
-          createdAt: true,
-        },
+        select: selectFields,
       }),
       prisma.bet.count({ where }),
     ]);
