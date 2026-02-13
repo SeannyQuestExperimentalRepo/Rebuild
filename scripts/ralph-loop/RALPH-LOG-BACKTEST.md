@@ -39,3 +39,53 @@
 
 ---
 
+## Phase 1: Diagnose Current Model Failures
+
+### Phase 1 / Iteration 1
+**Experiment**: Comprehensive v7 O/U model diagnostics (7 tests)
+**Hypothesis**: Overfitting comes from unstable coefficients, noise features, or contextual overrides
+**Result**:
+
+**ROOT CAUSE IDENTIFIED: Contextual overrides are the primary source of overfitting.**
+
+The pure regression model (no overrides) achieves:
+- 2025: 70.0% (3331/4760 with edge >= 1.5)
+- 2026: **65.1%** (881/1354 with edge >= 1.5)
+- **Gap: 4.9pp** (UNDER the 5pp target!)
+
+v7 with overrides reports 52.2% on 2026 — a 13pp degradation from the pure model. The overrides are memorized 2025 patterns:
+
+| Override | 2025 | 2026 | Gap |
+|----------|------|------|-----|
+| Both top-50 → UNDER | 78.4% | 50.6% | -27.8pp |
+| High line ≥155 → UNDER | 67.9% | 51.9% | -16.0pp |
+| Both 200+ → OVER | 66.9% | 49.1% | -17.8pp |
+| Low line <135 → OVER | 56.4% | 47.0% | -9.4pp |
+
+**Coefficient stability test** (1st half vs 2nd half of 2025):
+- STABLE: avgTempo (0.7% shift), sumAdjOE (24.1%), sumAdjDE (25.6%)
+- UNSTABLE: tempoDiff (390%), emAbsDiff (191%), fmTotal (556%), isConf (44%)
+
+**Feature ablation** (remove each, measure OOS impact):
+- Core (removing hurts OOS): avgTempo (-6.6pp), sumAdjDE (-11.9pp), sumAdjOE (-11.6pp)
+- Noise (removing has no impact): tempoDiff (+0.1pp), emAbsDiff (0.0pp), isConf (-0.5pp), fmTotal (-0.8pp)
+
+**Edge calibration** — monotonic and holds OOS:
+| Edge | 2025 Acc | 2026 Acc |
+|------|----------|----------|
+| 1.5-2.9 | 53.2% | 57.2% |
+| 3.0-4.9 | 62.8% | 64.3% |
+| 5.0-6.9 | 66.9% | 68.5% |
+| 7.0-9.9 | 71.1% | 66.3% |
+| 10.0+ | 83.4% | 87.1% |
+
+**Residual analysis**: Mean ~0, StdDev 15.39 (2025), 17.61 (2026). Feb 2026 has -3.54 bias (model over-predicts).
+
+**Vegas line**: R²=0.12-0.18. OLS improves RMSE by 5.9-11.1%.
+
+**Key finding**: The regression model alone exceeds ALL success criteria (65.1% OOS, 4.9pp gap). The overrides are actively harmful. Drop them.
+
+**Next step**: Phase 2 — test simplified models (3-feature, regularized, market-relative) to see if we can improve further or confirm the finding.
+
+---
+
