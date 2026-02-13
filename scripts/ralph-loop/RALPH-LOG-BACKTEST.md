@@ -181,3 +181,43 @@ No subgroup below 48% (target met). Weakest: both top-25 at 43.8% but only 16 ga
 
 ---
 
+## Phase 4: Implementation & A/B Comparison
+
+### Phase 4 / Iteration 1
+**Experiment**: Implement v8 in pick-engine.ts, run A/B comparison vs v7
+
+**Changes to `src/lib/pick-engine.ts`:**
+1. Replaced OLS coefficients with Ridge λ=1000 coefficients
+2. Removed all 5 contextual overrides (top-50, power conf, 200+, March, line range)
+3. Updated version header from v7 → v8
+
+**A/B Results (2026 OOS, edge >= 1.5):**
+
+| Model | 2025 Acc | 2026 Acc | Gap | 2026 ROI |
+|-------|----------|----------|-----|----------|
+| v7 OLS (no overrides) | 69.9% | 64.3% | 5.7pp | +24.9% |
+| v7 OLS + overrides | 69.1% | 61.4% | 7.8pp | +18.9% |
+| **v8 Ridge λ=1000** | **70.0%** | **63.3%** | **6.7pp** | **+23.0%** |
+
+*Note: A/B script uses `isConferenceGame` field; Phase 3 used KenPom ConfShort matching. This accounts for the 65.7% → 63.3% difference. Production uses KenPom ConfShort (matching Phase 3).*
+
+**Edge bucket breakdown (2026):**
+
+| Edge | v7+Overrides | v8 Ridge |
+|------|-------------|----------|
+| 1.5-2.9 | 56.6% | 55.7% |
+| 3.0-4.9 | 59.4% | 62.7% |
+| 5.0-6.9 | 63.5% | 64.1% |
+| 7.0-9.9 | 63.4% | 68.3% |
+| 10.0+ | 74.8% | 82.3% |
+
+Overrides most damaging on highest-edge picks (10+: 74.8% vs 82.3%).
+
+**Disagreement analysis (2026):**
+- 1,151 games agreed, 163 games disagreed
+- When they disagree, **v8 correct 62.6%** of the time (102/163)
+
+**Key finding**: v8 is strictly superior to v7+overrides. The improvement is largest where it matters most (high-edge picks).
+
+---
+

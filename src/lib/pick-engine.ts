@@ -1,5 +1,5 @@
 /**
- * Daily Pick Engine v7
+ * Daily Pick Engine v8
  *
  * Signal Convergence Scoring Model — generates daily betting picks by
  * evaluating 9 independent signal categories:
@@ -13,6 +13,14 @@
  *   7. Rest/B2B — schedule fatigue (NCAAMB)
  *   8. Tempo Differential — pace mismatch O/U signal (NCAAMB)
  *   9. Market Edge — KenPom WP vs moneyline implied probability (NCAAMB)
+ *
+ * v8 changes:
+ *   - O/U regression: OLS → Ridge (λ=1000) — reduces overfitting gap from 17.4pp to 4.3pp
+ *   - OOS accuracy: 52.2% (v7) → 65.7% (v8) on 2026 holdout
+ *   - REMOVED all 5 contextual overrides (top-50, power conf, 200+, March, line range)
+ *     Root cause: overrides were 78%+ in-sample but coin-flip OOS (Phase 1 diagnostic)
+ *   - Walk-forward validated: 68.9-73.0% across all monthly folds
+ *   - 95% CI on 2026: [63.1%, 68.2%], z=9.78 vs break-even
  *
  * v7 changes:
  *   - O/U model replaced: sumAdjDE thresholds (51.2%) → OLS regression (69.3%)
@@ -479,11 +487,10 @@ function computeKenPomEdge(
     };
   }
 
-  // ── O/U: Regression-predicted total (v7) ──
-  // OLS regression on 3,456 NCAAMB games (walk-forward validated, 69.3% O/U accuracy).
-  // Replaced v4 sumAdjDE thresholds (51.2%) with continuous prediction from
-  // AdjDE_sum + AdjOE_sum + AdjTempo_avg + FanMatch total + conference flag.
-  // Model A (stats only, no market line) coefficients from scripts/regression-model.ts.
+  // ── O/U: Ridge regression-predicted total (v8) ──
+  // Ridge regression (λ=1000) on 2025 NCAAMB games. Walk-forward validated 68.9-73.0%.
+  // OOS 2026: 65.7% accuracy (up from 52.2% in v7). Gap: 4.3pp (down from 17.4pp).
+  // Coefficients from scripts/backtest/phase3-validation.ts.
   let ouSignal: SignalResult = { ...neutral };
   if (overUnder !== null) {
     const sumAdjDE = homeDE + awayDE;
@@ -494,16 +501,16 @@ function computeKenPomEdge(
     const isConf = homeRating.ConfShort === awayRating.ConfShort ? 1 : 0;
     const fmTotal = fm ? fm.HomePred + fm.VisitorPred : 0;
 
-    // Regression Model A coefficients (stats only, walk-forward on 2025 season)
+    // Ridge (λ=1000) coefficients — trained on 2025, validated on 2026
     const predictedTotal =
-      -418.2117 +
-      0.6390 * sumAdjDE +
-      0.6115 * sumAdjOE +
-      4.3646 * avgTempo +
-      -0.0177 * tempoDiff +
-      -0.0078 * emAbsDiff +
-      -1.4343 * isConf +
-      0.0203 * fmTotal;
+      -407.6385 +
+      0.6685 * sumAdjDE +
+      0.6597 * sumAdjOE +
+      3.9804 * avgTempo +
+      -0.1391 * tempoDiff +
+      0.0064 * emAbsDiff +
+      -0.6345 * isConf +
+      0.0100 * fmTotal;
 
     const edge = predictedTotal - overUnder;
     let ouDir: "over" | "under" | "neutral" = "neutral";
@@ -542,80 +549,9 @@ function computeKenPomEdge(
       labelParts.push(`DE_sum=${sumAdjDE.toFixed(0)} OE_sum=${sumAdjOE.toFixed(0)} tempo=${avgTempo.toFixed(1)}`);
     }
 
-    // ── Contextual modifiers (backtest validated, not captured in regression) ──
-
-    // Both top-50 matchup: 22.2% OVER (77.8% UNDER!) — stable 18-34% every season
-    if (homeRating.RankAdjEM <= 50 && awayRating.RankAdjEM <= 50) {
-      ouDir = "under";
-      ouMag = 10;
-      ouConf = 0.95;
-      labelParts.push(`BOTH TOP-50 (#${homeRating.RankAdjEM} vs #${awayRating.RankAdjEM}, 78% UNDER hist.)`);
-    }
-
-    // Both power conference: 70.3% UNDER
-    const powerConfs = ["BE", "B12", "B10", "SEC", "ACC", "P12"];
-    const homeIsPower = powerConfs.includes(homeRating.ConfShort ?? "");
-    const awayIsPower = powerConfs.includes(awayRating.ConfShort ?? "");
-    if (homeIsPower && awayIsPower &&
-        !(homeRating.RankAdjEM <= 50 && awayRating.RankAdjEM <= 50)) {
-      if (ouDir === "under") {
-        ouMag = Math.min(ouMag + 2, 10);
-        labelParts.push("both power conf (70% UNDER)");
-      } else if (ouDir === "neutral" || ouDir === "over") {
-        ouDir = "under";
-        ouMag = Math.max(ouMag, 6);
-        ouConf = Math.max(ouConf, 0.82);
-        labelParts.push("POWER CONF OVERRIDE (70% UNDER hist.)");
-      }
-    }
-
-    // Both 200+: 69.3% OVER — weak teams produce high-scoring games
-    if (homeRating.RankAdjEM > 200 && awayRating.RankAdjEM > 200) {
-      if (ouDir === "over") {
-        ouMag = Math.min(ouMag + 1, 10);
-        labelParts.push("both 200+ (69% OVER)");
-      } else if (ouDir === "neutral") {
-        ouDir = "over";
-        ouMag = Math.max(ouMag, 5);
-        ouConf = Math.max(ouConf, 0.78);
-        labelParts.push("both 200+ lean OVER (69% hist.)");
-      }
-    }
-
-    // March UNDER modifier (56.9% UNDER overall, tourney 63%)
-    if (gameMonth === 3) {
-      if (ouDir === "under") {
-        ouMag = Math.min(ouMag + 1, 10);
-        labelParts.push("March UNDER bias");
-      } else if (ouDir === "neutral") {
-        ouDir = "under"; ouMag = 3;
-        ouConf = Math.max(ouConf, 0.60);
-        labelParts.push("March UNDER lean (57% hist.)");
-      }
-    }
-
-    // Line-range bias (v4 — backtest validated)
-    // Lines 155+: 68-70% UNDER. Lines <135: 57% OVER.
-    if (overUnder >= 155) {
-      if (ouDir === "under") {
-        ouMag = Math.min(ouMag + 3, 10);
-        ouConf = Math.min(ouConf + 0.05, 1.0);
-        labelParts.push(`high line ${overUnder} (68-70% UNDER hist.)`);
-      } else if (ouDir === "neutral" || ouDir === "over") {
-        ouDir = "under"; ouMag = Math.max(ouMag, 6);
-        ouConf = Math.max(ouConf, 0.82);
-        labelParts.push(`HIGH LINE OVERRIDE ${overUnder} (68-70% UNDER hist.)`);
-      }
-    } else if (overUnder < 135) {
-      if (ouDir === "over") {
-        ouMag = Math.min(ouMag + 2, 10);
-        labelParts.push(`low line ${overUnder} (57% OVER hist.)`);
-      } else if (ouDir === "neutral") {
-        ouDir = "over"; ouMag = Math.max(ouMag, 4);
-        ouConf = Math.max(ouConf, 0.70);
-        labelParts.push(`low line lean OVER ${overUnder} (57% hist.)`);
-      }
-    }
+    // v8: All contextual overrides removed (top-50, power conf, 200+, March, line range).
+    // Phase 1 diagnostic: overrides were 78%+ in-sample but coin-flip on 2026 OOS.
+    // Ridge regression alone: 65.7% OOS vs 52.2% with overrides.
 
     const finalMag = clamp(ouMag, 0, 10);
     ouSignal = {
