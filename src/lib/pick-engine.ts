@@ -1962,8 +1962,8 @@ async function discoverProps(
             headline: `${result.overall.hitRate}% hit rate (${result.overall.hits}/${result.overall.total}) — ${(wilsonLower * 100).toFixed(0)}% floor vs ${opponent}`,
             reasoning,
           });
-        } catch {
-          // skip individual prop failures
+        } catch (err) {
+          console.warn(`[pick-engine] Prop query failed for ${player.playerName} ${stat}:`, err);
         }
       }
     }
@@ -1974,10 +1974,29 @@ async function discoverProps(
 
 // ─── Main: Generate Daily Picks ──────────────────────────────────────────────
 
+export interface PickGenerationContext {
+  kenpomAvailable: boolean;
+  cfbdAvailable: boolean;
+  fanmatchAvailable: boolean;
+  gamesProcessed: number;
+  gamesErrored: number;
+  picksGenerated: number;
+  rejectedInsufficientSignals: number;
+}
+
 export async function generateDailyPicks(
   dateStr: string,
   sport: Sport,
-): Promise<GeneratedPick[]> {
+): Promise<{ picks: GeneratedPick[]; context: PickGenerationContext }> {
+  const context: PickGenerationContext = {
+    kenpomAvailable: false,
+    cfbdAvailable: false,
+    fanmatchAvailable: false,
+    gamesProcessed: 0,
+    gamesErrored: 0,
+    picksGenerated: 0,
+    rejectedInsufficientSignals: 0,
+  };
   // Use ET boundaries so the game window matches the US sports calendar.
   // ET midnight = 05:00 UTC (EST). Without this, yesterday's 7 PM+ ET games
   // bleed in because they cross UTC midnight.
@@ -1995,7 +2014,7 @@ export async function generateDailyPicks(
     orderBy: { gameDate: "asc" },
   });
 
-  if (upcomingGames.length === 0) return [];
+  if (upcomingGames.length === 0) return { picks: [], context };
 
   const allGames = await loadGamesBySportCached(sport);
   const currentSeason = getCurrentSeason(sport, dateStart);
@@ -2008,12 +2027,14 @@ export async function generateDailyPicks(
   if (sport === "NCAAMB") {
     try {
       kenpomRatings = await getKenpomRatings();
+      context.kenpomAvailable = kenpomRatings !== null && kenpomRatings.size > 0;
     } catch (err) {
       console.error("[pick-engine] KenPom fetch failed, continuing without:", err);
     }
     // v6: Fetch FanMatch game-level predictions (cached for 2h)
     try {
       kenpomFanMatch = await getKenpomFanMatch(dateStr);
+      context.fanmatchAvailable = kenpomFanMatch !== null && kenpomFanMatch.length > 0;
     } catch (err) {
       console.error("[pick-engine] FanMatch fetch failed, continuing without:", err);
     }
@@ -2024,6 +2045,7 @@ export async function generateDailyPicks(
   if (sport === "NCAAF") {
     try {
       cfbdRatings = await getCFBDRatings();
+      context.cfbdAvailable = cfbdRatings !== null && cfbdRatings.size > 0;
     } catch (err) {
       console.error("[pick-engine] CFBD SP+ fetch failed, continuing without:", err);
     }
@@ -2089,7 +2111,9 @@ export async function generateDailyPicks(
             const result = computeConvergenceScore(spreadSignals, sportWeightsSpread, true, 3);
             const confidence = result.score >= 85 ? 5 : result.score >= 70 ? 4 : 0;
 
-            if (confidence > 0) {
+            if (confidence === 0) {
+              context.rejectedInsufficientSignals++;
+            } else {
               const teamName = result.direction === "home" ? canonHome : canonAway;
               const spreadVal = result.direction === "home" ? game.spread : -(game.spread);
 
@@ -2136,7 +2160,9 @@ export async function generateDailyPicks(
             const result = computeConvergenceScore(ouSignals, sportWeightsOU, true, 3);
             const confidence = result.score >= 85 ? 5 : result.score >= 70 ? 4 : 0;
 
-            if (confidence > 0) {
+            if (confidence === 0) {
+              context.rejectedInsufficientSignals++;
+            } else {
               const label = result.direction === "over" ? "Over" : "Under";
 
               picks.push({
@@ -2168,7 +2194,9 @@ export async function generateDailyPicks(
             currentSeason,
           );
           picks.push(...propPicks);
+          context.gamesProcessed++;
         } catch (err) {
+          context.gamesErrored++;
           console.error(`[pick-engine] Error processing ${game.homeTeam} vs ${game.awayTeam}:`, err);
         }
 
@@ -2179,7 +2207,12 @@ export async function generateDailyPicks(
     allPicks.push(...batchResults.flat());
   }
 
-  return allPicks.sort((a, b) => b.trendScore - a.trendScore);
+  context.picksGenerated = allPicks.length;
+  console.log(
+    `[pick-engine] ${sport}: processed=${context.gamesProcessed}, errored=${context.gamesErrored}, picks=${context.picksGenerated}, rejected=${context.rejectedInsufficientSignals}`,
+  );
+
+  return { picks: allPicks.sort((a, b) => b.trendScore - a.trendScore), context };
 }
 
 // ─── Grade Yesterday's Picks ─────────────────────────────────────────────────

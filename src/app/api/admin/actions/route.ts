@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
           where: { date: dateKey, sport: targetSport },
         });
 
-        const picks = await generateDailyPicks(dateStr, targetSport);
+        const { picks } = await generateDailyPicks(dateStr, targetSport);
         if (picks.length > 0) {
           await prisma.dailyPick.createMany({
             data: picks.map((p) => ({

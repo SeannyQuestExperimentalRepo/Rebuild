@@ -254,9 +254,19 @@ export async function POST(request: NextRequest) {
             continue;
           }
 
-          const picks = await generateDailyPicks(todayStr, sport);
+          const { picks, context: pickContext } = await generateDailyPicks(todayStr, sport);
+
+          if (pickContext.gamesErrored > 0) {
+            Sentry.addBreadcrumb({
+              category: "pick-engine",
+              message: `${sport}: ${pickContext.gamesErrored} games errored during processing`,
+              level: "warning",
+              data: pickContext,
+            });
+          }
+
           if (picks.length > 0) {
-            await prisma.dailyPick.createMany({
+            const createResult = await prisma.dailyPick.createMany({
               data: picks.map((p) => ({
                 date: todayKey,
                 sport: p.sport,
@@ -277,8 +287,19 @@ export async function POST(request: NextRequest) {
               })),
               skipDuplicates: true,
             });
+
+            // Detect duplicates (race condition from concurrent cron runs)
+            if (createResult.count < picks.length) {
+              const dupes = picks.length - createResult.count;
+              console.warn(`[Cron] ${sport}: ${dupes} duplicate picks skipped (concurrent cron?)`);
+              Sentry.addBreadcrumb({
+                category: "cron",
+                message: `${sport}: ${dupes} duplicate picks detected`,
+                level: "warning",
+              });
+            }
           }
-          results[`picks_${sport}`] = { generated: picks.length };
+          results[`picks_${sport}`] = { generated: picks.length, context: pickContext };
           console.log(`[Cron] Generated ${picks.length} picks for ${sport}`);
         } catch (err) {
           Sentry.captureException(err, { tags: { cronStep: "generate_picks", sport } });
@@ -391,17 +412,39 @@ export async function POST(request: NextRequest) {
     const durationMs = Math.round(performance.now() - start);
     Sentry.metrics.gauge("cron.duration_ms", durationMs, { unit: "millisecond" });
 
-    // Sentry Cron Monitor: signal successful completion
+    // Compute health: check if critical steps errored or 0 picks generated
+    const hasStepError = Object.values(results).some(
+      (r) => r && typeof r === "object" && "error" in (r as Record<string, unknown>),
+    );
+    const totalPicks = SPORTS.reduce((sum, s) => {
+      const d = results[`picks_${s}`] as { generated?: number; skipped?: boolean } | undefined;
+      if (d?.skipped) return sum; // skipped is fine (already exist)
+      return sum + (d?.generated ?? 0);
+    }, 0);
+    const allSkipped = SPORTS.every((s) => {
+      const d = results[`picks_${s}`] as { skipped?: boolean } | undefined;
+      return d?.skipped;
+    });
+    const cronHealthy = !hasStepError && (totalPicks > 0 || allSkipped);
+
+    // Sentry Cron Monitor: signal actual health
     Sentry.captureCheckIn({
       checkInId,
       monitorSlug: "daily-sync",
-      status: "ok",
+      status: cronHealthy ? "ok" : "error",
     });
 
+    if (!cronHealthy) {
+      Sentry.captureMessage("Daily cron completed with issues", {
+        level: "warning",
+        extra: { results, totalPicks, hasStepError },
+      });
+    }
+
     return NextResponse.json({
-      success: true,
+      success: cronHealthy,
       data: results,
-      meta: { durationMs },
+      meta: { durationMs, healthy: cronHealthy },
     });
   } catch (err) {
     // Sentry Cron Monitor: signal failure

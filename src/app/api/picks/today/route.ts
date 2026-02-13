@@ -96,7 +96,7 @@ export async function GET(req: NextRequest) {
       }
 
       // Small slate — generate inline
-      const generatedPicks = await generateDailyPicks(date, sport as Sport);
+      const { picks: generatedPicks } = await generateDailyPicks(date, sport as Sport);
 
       if (generatedPicks.length > 0) {
         const pickData = generatedPicks.map((p) => ({
