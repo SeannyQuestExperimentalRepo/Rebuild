@@ -46,17 +46,27 @@ export async function POST(req: NextRequest) {
 
   const dateStr = todayET();
   const dateKey = new Date(dateStr + "T00:00:00Z");
+  const force = req.nextUrl.searchParams.get("force") === "true";
 
-  // Skip if picks already exist
+  // Check if picks already exist
   const existing = await prisma.dailyPick.count({
     where: { date: dateKey, sport: sport as Sport },
   });
-  if (existing > 0) {
+
+  if (existing > 0 && !force) {
     return NextResponse.json({
       success: true,
-      message: `${existing} picks already exist for ${sport} on ${dateStr}`,
+      message: `${existing} picks already exist for ${sport} on ${dateStr}. Use ?force=true to regenerate.`,
       generated: 0,
     });
+  }
+
+  // Force mode: delete pending picks before regenerating with fresh odds
+  if (existing > 0 && force) {
+    const deleted = await prisma.dailyPick.deleteMany({
+      where: { date: dateKey, sport: sport as Sport, result: "PENDING" },
+    });
+    console.log(`[picks/generate] Force mode: deleted ${deleted.count} pending ${sport} picks`);
   }
 
   try {

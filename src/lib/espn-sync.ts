@@ -20,6 +20,26 @@ import {
   type Sport,
 } from "./espn-api";
 
+// ─── Non-D1 / Exhibition Filter ──────────────────────────────────────────────
+
+/** Patterns indicating a non-D1, exhibition, or placeholder team */
+const NON_D1_PATTERNS = [
+  /\bexhibition\b/i,
+  /\bselect\b/i,
+  /\ball[- ]?stars?\b/i,
+  /\btba\b/i,
+  /\bd[- ]?ii\b/i,
+  /\bd[- ]?iii\b/i,
+  /\bnaia\b/i,
+  /\bjuco\b/i,
+  /\bcommunity college\b/i,
+  /\b(preseason|postseason)\s+nit\b/i,
+];
+
+function isNonD1Team(teamName: string): boolean {
+  return NON_D1_PATTERNS.some((p) => p.test(teamName));
+}
+
 // ─── Refresh Upcoming Games (Odds) ──────────────────────────────────────────
 
 export interface RefreshResult {
@@ -61,40 +81,48 @@ export async function refreshUpcomingGames(sport: Sport): Promise<RefreshResult>
       ?? g.awayTeam.rank
       ?? null;
 
-    try {
-      await prisma.upcomingGame.upsert({
-        where: {
-          sport_gameDate_homeTeam_awayTeam: {
+    // Upsert with single retry for transient DB errors
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await prisma.upcomingGame.upsert({
+          where: {
+            sport_gameDate_homeTeam_awayTeam: {
+              sport,
+              gameDate,
+              homeTeam,
+              awayTeam,
+            },
+          },
+          create: {
             sport,
             gameDate,
             homeTeam,
             awayTeam,
+            homeRank,
+            awayRank,
+            spread: g.odds.spread,
+            overUnder: g.odds.overUnder,
+            moneylineHome: g.odds.moneylineHome,
+            moneylineAway: g.odds.moneylineAway,
           },
-        },
-        create: {
-          sport,
-          gameDate,
-          homeTeam,
-          awayTeam,
-          homeRank,
-          awayRank,
-          spread: g.odds.spread,
-          overUnder: g.odds.overUnder,
-          moneylineHome: g.odds.moneylineHome,
-          moneylineAway: g.odds.moneylineAway,
-        },
-        update: {
-          homeRank,
-          awayRank,
-          spread: g.odds.spread,
-          overUnder: g.odds.overUnder,
-          moneylineHome: g.odds.moneylineHome,
-          moneylineAway: g.odds.moneylineAway,
-        },
-      });
-      upserted++;
-    } catch (err) {
-      console.warn(`[ESPN Sync] Upsert failed for ${awayTeam} @ ${homeTeam}:`, err);
+          update: {
+            homeRank,
+            awayRank,
+            spread: g.odds.spread,
+            overUnder: g.odds.overUnder,
+            moneylineHome: g.odds.moneylineHome,
+            moneylineAway: g.odds.moneylineAway,
+          },
+        });
+        upserted++;
+        break;
+      } catch (err) {
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 1000));
+          continue;
+        }
+        console.warn(`[ESPN Sync] Upsert failed for ${awayTeam} @ ${homeTeam}:`, err);
+      }
     }
   }
 
@@ -179,6 +207,12 @@ export async function syncCompletedGames(
     const awayScore = game.awayTeam.score;
 
     if (homeScore == null || awayScore == null) {
+      skipped++;
+      continue;
+    }
+
+    // Skip non-D1 / exhibition games to prevent phantom team pollution
+    if (isNonD1Team(game.homeTeam.displayName) || isNonD1Team(game.awayTeam.displayName)) {
       skipped++;
       continue;
     }

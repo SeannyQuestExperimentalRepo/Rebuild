@@ -126,6 +126,8 @@ export function lookupCFBDRating(
     if (entry[0].toLowerCase() === lower) return entry[1];
   }
 
+  // Log unmatched name for incremental improvement of mappings
+  console.warn(`[cfbd] Unmatched team name: "${teamName}" (normalized: "${normalized}")`);
   return undefined;
 }
 
@@ -163,6 +165,28 @@ const ESPN_TO_CFBD: Record<string, string> = {
   "WKU": "Western Kentucky",
   "MTSU": "Middle Tennessee",
   "BGSU": "Bowling Green",
+  // Additional ESPN→CFBD mappings
+  "N.C. State": "NC State",
+  "NC State": "NC State",
+  "BYU": "BYU",
+  "TCU": "TCU",
+  "USF": "South Florida",
+  "South Florida": "South Florida",
+  "North Texas": "North Texas",
+  "Louisiana": "Louisiana",
+  "Louisiana-Lafayette": "Louisiana",
+  "Louisiana-Monroe": "Louisiana Monroe",
+  "Middle Tennessee": "Middle Tennessee",
+  "ETSU": "East Tennessee",
+  "Central Michigan": "Central Michigan",
+  "Eastern Michigan": "Eastern Michigan",
+  "Western Michigan": "Western Michigan",
+  "Southern Miss": "Southern Mississippi",
+  "Southern Mississippi": "Southern Mississippi",
+  "Sam Houston": "Sam Houston State",
+  "Sam Houston State": "Sam Houston State",
+  "Jacksonville State": "Jacksonville State",
+  "Kennesaw State": "Kennesaw State",
 };
 
 function normalizeToCFBD(espnName: string): string {

@@ -170,6 +170,8 @@ export function lookupRating(
     if (entry[0].toLowerCase() === lower) return entry[1];
   }
 
+  // Log unmatched name for incremental improvement of mappings
+  console.warn(`[kenpom] Unmatched team name: "${teamName}" (normalized: "${normalized}")`);
   return undefined;
 }
 
@@ -228,6 +230,48 @@ const DB_TO_KENPOM: Record<string, string> = {
   "Seattle": "Seattle",
   "Hawai'i": "Hawaii",
   "Hawaii": "Hawaii",
+  // Additional ESPN→KenPom mappings
+  "UNI": "Northern Iowa",
+  "ETSU": "East Tennessee St.",
+  "FGCU": "Florida Gulf Coast",
+  "UMBC": "UMBC",
+  "SIUE": "SIU Edwardsville",
+  "App State": "Appalachian St.",
+  "Appalachian State": "Appalachian St.",
+  "BYU": "BYU",
+  "TCU": "TCU",
+  "UNF": "North Florida",
+  "UNCG": "UNC Greensboro",
+  "UNCW": "UNC Wilmington",
+  "UNCA": "UNC Asheville",
+  "Central Connecticut": "Central Connecticut",
+  "Central Connecticut State": "Central Connecticut",
+  "Cal Poly": "Cal Poly",
+  "Iona": "Iona",
+  "Gonzaga": "Gonzaga",
+  "Saint Louis": "Saint Louis",
+  "St. Louis": "Saint Louis",
+  "UNC Greensboro": "UNC Greensboro",
+  "UNC Wilmington": "UNC Wilmington",
+  "UNC Asheville": "UNC Asheville",
+  "NJIT": "NJIT",
+  "FAU": "Florida Atlantic",
+  "WKU": "Western Kentucky",
+  "Middle Tennessee": "Middle Tennessee",
+  "MTSU": "Middle Tennessee",
+  "South Florida": "South Florida",
+  "USF": "South Florida",
+  "North Texas": "North Texas",
+  "Louisiana": "Louisiana",
+  "Louisiana-Lafayette": "Louisiana",
+  "Louisiana-Monroe": "Louisiana Monroe",
+  "Little Rock": "Little Rock",
+  "UALR": "Little Rock",
+  "Omaha": "Omaha",
+  "Detroit Mercy": "Detroit Mercy",
+  "Detroit": "Detroit Mercy",
+  "Green Bay": "Green Bay",
+  "Milwaukee": "Milwaukee",
 };
 
 function normalizeToKenpom(dbName: string): string {

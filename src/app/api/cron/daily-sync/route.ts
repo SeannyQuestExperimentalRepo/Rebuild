@@ -237,21 +237,33 @@ export async function POST(request: NextRequest) {
 
     // 3. Pre-generate today's daily picks for all sports
     // Done here (after odds refresh) so picks are ready before users check
+    // Afternoon/evening runs (UTC 17+) use force mode to regenerate with fresh odds
     {
       const { generateDailyPicks } = await import("@/lib/pick-engine");
       const { prisma } = await import("@/lib/db");
       const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
       const todayKey = new Date(todayStr + "T00:00:00Z");
+      const currentHourUTC = new Date().getUTCHours();
+      const forceRegenerate = currentHourUTC >= 17; // Afternoon+ runs refresh picks
 
       for (const sport of SPORTS) {
         try {
-          // Skip if picks already exist for today
+          // Check if picks already exist for today
           const existing = await prisma.dailyPick.count({
             where: { date: todayKey, sport },
           });
-          if (existing > 0) {
+
+          if (existing > 0 && !forceRegenerate) {
             results[`picks_${sport}`] = { skipped: true, existing };
             continue;
+          }
+
+          // Force mode: delete pending picks before regenerating with fresh odds
+          if (existing > 0 && forceRegenerate) {
+            const deleted = await prisma.dailyPick.deleteMany({
+              where: { date: todayKey, sport, result: "PENDING" },
+            });
+            console.log(`[Cron] Force-regenerating ${sport} picks (deleted ${deleted.count} pending picks)`);
           }
 
           const { picks, context: pickContext } = await generateDailyPicks(todayStr, sport);

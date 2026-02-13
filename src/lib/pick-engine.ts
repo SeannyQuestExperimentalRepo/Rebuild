@@ -1986,6 +1986,7 @@ export interface PickGenerationContext {
   gamesErrored: number;
   picksGenerated: number;
   rejectedInsufficientSignals: number;
+  staleOddsGames: number;
 }
 
 export async function generateDailyPicks(
@@ -2000,6 +2001,7 @@ export async function generateDailyPicks(
     gamesErrored: 0,
     picksGenerated: 0,
     rejectedInsufficientSignals: 0,
+    staleOddsGames: 0,
   };
   // Use ET boundaries so the game window matches the US sports calendar.
   // ET midnight = 05:00 UTC (EST). Without this, yesterday's 7 PM+ ET games
@@ -2019,6 +2021,20 @@ export async function generateDailyPicks(
   });
 
   if (upcomingGames.length === 0) return { picks: [], context };
+
+  // Check odds freshness — warn if odds are >12h old
+  const STALE_THRESHOLD_MS = 12 * 60 * 60 * 1000;
+  const now = Date.now();
+  for (const game of upcomingGames) {
+    if (now - game.lastUpdated.getTime() > STALE_THRESHOLD_MS) {
+      context.staleOddsGames++;
+    }
+  }
+  if (context.staleOddsGames > 0) {
+    console.warn(
+      `[pick-engine] ${sport}: ${context.staleOddsGames}/${upcomingGames.length} games have stale odds (>12h old)`,
+    );
+  }
 
   const allGames = await loadGamesBySportCached(sport);
   const currentSeason = getCurrentSeason(sport, dateStart);
