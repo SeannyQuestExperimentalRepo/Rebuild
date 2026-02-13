@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import webpush from "web-push";
 import { prisma } from "@/lib/db";
+import { publicLimiter, applyRateLimit } from "@/lib/rate-limit";
 
 // Configure VAPID keys (generate with: npx web-push generate-vapid-keys)
 const VAPID_PUBLIC = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
@@ -17,7 +18,11 @@ const VAPID_PRIVATE = process.env.VAPID_PRIVATE_KEY;
 const VAPID_EMAIL = process.env.VAPID_EMAIL || "mailto:admin@trendline.app";
 
 export async function POST(req: NextRequest) {
-  // Auth: either CRON_SECRET or authenticated user
+  // Rate limit (defense in depth alongside CRON_SECRET)
+  const limited = applyRateLimit(req, publicLimiter);
+  if (limited) return limited;
+
+  // Auth: CRON_SECRET required
   const cronSecret = process.env.CRON_SECRET;
   const authHeader = req.headers.get("authorization");
   if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
