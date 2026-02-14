@@ -100,6 +100,7 @@ export async function refreshUpcomingGames(sport: Sport): Promise<RefreshResult>
             awayTeam,
             homeRank,
             awayRank,
+            isNeutralSite: g.neutralSite,
             spread: g.odds.spread,
             overUnder: g.odds.overUnder,
             moneylineHome: g.odds.moneylineHome,
@@ -108,6 +109,7 @@ export async function refreshUpcomingGames(sport: Sport): Promise<RefreshResult>
           update: {
             homeRank,
             awayRank,
+            isNeutralSite: g.neutralSite,
             spread: g.odds.spread,
             overUnder: g.odds.overUnder,
             moneylineHome: g.odds.moneylineHome,
@@ -198,6 +200,8 @@ export async function syncCompletedGames(
     awayCanonical: string;
     inlineSpread: number | null;
     inlineOverUnder: number | null;
+    neutralSite: boolean;
+    conferenceGame: boolean;
   }
 
   const prepared: PreparedGame[] = [];
@@ -237,6 +241,8 @@ export async function syncCompletedGames(
       awayCanonical: mapTeamToCanonical(game.awayTeam, sport) ?? game.awayTeam.displayName,
       inlineSpread: game.inlineOdds?.spread ?? null,
       inlineOverUnder: game.inlineOdds?.overUnder ?? null,
+      neutralSite: game.neutralSite,
+      conferenceGame: game.conferenceGame,
     });
   }
 
@@ -346,6 +352,7 @@ export async function syncCompletedGames(
           winnerId: scoreDifference > 0 ? g.homeTeamId : scoreDifference < 0 ? g.awayTeamId : null,
           spread,
           overUnder,
+          isNeutralSite: g.neutralSite,
           spreadResult: calculateSpreadResult(g.homeScore, g.awayScore, spread),
           ouResult: calculateOUResult(g.homeScore, g.awayScore, overUnder),
         };
@@ -373,6 +380,8 @@ export async function syncCompletedGames(
           winnerId: scoreDifference > 0 ? g.homeTeamId : scoreDifference < 0 ? g.awayTeamId : null,
           homeRank: g.homeRank,
           awayRank: g.awayRank,
+          isNeutralSite: g.neutralSite,
+          isConferenceGame: g.conferenceGame,
           spread,
           overUnder,
           spreadResult: calculateSpreadResult(g.homeScore, g.awayScore, spread),
@@ -400,6 +409,8 @@ export async function syncCompletedGames(
           winnerId: scoreDifference > 0 ? g.homeTeamId : scoreDifference < 0 ? g.awayTeamId : null,
           homeRank: g.homeRank,
           awayRank: g.awayRank,
+          isNeutralSite: g.neutralSite,
+          isConferenceGame: g.conferenceGame,
           spread,
           overUnder,
           moneylineHome: odds?.moneylineHome ?? null,

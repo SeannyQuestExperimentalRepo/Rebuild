@@ -346,6 +346,7 @@ model UpcomingGame {
   forecastWindMph  Float?
   forecastCategory WeatherCategory?
   forecastUpdated  DateTime?
+  isNeutralSite    Boolean          @default(false)
   fmHomePred       Float?           // FanMatch predicted home score
   fmAwayPred       Float?           // FanMatch predicted away score
   fmHomeWinProb    Float?           // FanMatch home win probability (0-1)

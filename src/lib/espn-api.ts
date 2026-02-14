@@ -74,6 +74,7 @@ export interface UpcomingGameWithOdds {
   odds: ESPNOdds;
   homeCanonical: string | null;
   awayCanonical: string | null;
+  neutralSite: boolean;
 }
 
 // ─── ESPN URL Config ────────────────────────────────────────────────────────
@@ -291,6 +292,8 @@ interface ESPNOddsEvent {
 interface ESPNOddsCompetition {
   id: string;
   date: string;
+  neutralSite?: boolean;
+  conferenceCompetition?: boolean;
   status: {
     type: {
       state: string;
@@ -390,6 +393,7 @@ export async function fetchUpcomingWithOdds(
         odds,
         homeCanonical: mapTeamToCanonical(homeTeam, sport),
         awayCanonical: mapTeamToCanonical(awayTeam, sport),
+        neutralSite: comp.neutralSite ?? false,
       });
     }
 
