@@ -73,6 +73,11 @@ import {
   type KenpomFanMatch,
 } from "./kenpom";
 import { getCFBDRatings, lookupCFBDRating, type CFBDRating } from "./cfbd";
+import { signalEloEdge } from "./elo";
+import { signalBarttovikEnsemble } from "./barttorvik";
+import { signalNFLEPA } from "./nflverse";
+import { signalNBAFourFactors } from "./nba-stats";
+import { signalWeather } from "./weather";
 import type { Sport } from "@prisma/client";
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
@@ -117,72 +122,84 @@ interface SignalResult {
 
 const SPREAD_WEIGHTS: Record<string, Record<string, number>> = {
   NCAAMB: {
-    modelEdge: 0.3,
+    modelEdge: 0.25, // v10: reduced from 0.30 for eloEdge + barttorvik
     seasonATS: 0.15,
-    trendAngles: 0.25,
-    recentForm: 0.1, // v6: reduced from 0.15 to make room for marketEdge
-    h2h: 0.05, // v6: reduced from 0.10 to make room for marketEdge
+    trendAngles: 0.2, // v10: reduced from 0.25
+    recentForm: 0.1,
+    h2h: 0.05,
     situational: 0.0,
     restDays: 0.05,
-    marketEdge: 0.1, // v6: KenPom WP vs moneyline implied probability
+    marketEdge: 0.1,
+    eloEdge: 0.05, // v10: Elo rating edge
+    barttorvik: 0.05, // v10: T-Rank ensemble signal
   },
   NFL: {
-    modelEdge: 0.2,
-    seasonATS: 0.15,
-    trendAngles: 0.25,
+    modelEdge: 0.15, // v10: reduced from 0.20 for eloEdge + nflEpa
+    seasonATS: 0.1, // v10: reduced from 0.15
+    trendAngles: 0.2, // v10: reduced from 0.25
     recentForm: 0.2,
     h2h: 0.1,
     situational: 0.1,
+    eloEdge: 0.05, // v10: Elo rating edge
+    nflEpa: 0.1, // v10: EPA-based efficiency signal
   },
   NCAAF: {
-    modelEdge: 0.3, // SP+ efficiency ratings (up from 0.20 with power ratings)
+    modelEdge: 0.25, // v10: reduced from 0.30 for eloEdge
     seasonATS: 0.15,
     trendAngles: 0.2,
     recentForm: 0.15,
     h2h: 0.1,
     situational: 0.1,
+    eloEdge: 0.05, // v10: Elo rating edge
   },
   NBA: {
-    modelEdge: 0.25,
+    modelEdge: 0.15, // v10: reduced from 0.25 for eloEdge + nbaFourFactors
     seasonATS: 0.15,
-    trendAngles: 0.25,
+    trendAngles: 0.2, // v10: reduced from 0.25
     recentForm: 0.15,
     h2h: 0.05,
     situational: 0.05,
     restDays: 0.1,
+    eloEdge: 0.05, // v10: Elo rating edge
+    nbaFourFactors: 0.1, // v10: NBA Four Factors efficiency signal
   },
 };
 
 const OU_WEIGHTS: Record<string, Record<string, number>> = {
   NCAAMB: {
-    modelEdge: 0.35, // v7: OLS regression predicted total (69.3% accuracy, +32% ROI)
+    modelEdge: 0.3, // v10: reduced from 0.35 for barttorvik
     seasonOU: 0.12,
     trendAngles: 0.18,
     recentForm: 0.08,
     h2hWeather: 0.12,
-    tempoDiff: 0.15, // v5: tempo mismatch signal (5★ O/U +2.9% ROI)
+    tempoDiff: 0.15,
+    barttorvik: 0.05, // v10: T-Rank O/U ensemble signal
   },
   NFL: {
-    modelEdge: 0.2,
-    seasonOU: 0.2,
+    modelEdge: 0.1, // v10: reduced from 0.20 for nflEpa + weather
+    seasonOU: 0.15, // v10: reduced from 0.20
     trendAngles: 0.2,
     recentForm: 0.15,
-    h2hWeather: 0.25,
+    h2hWeather: 0.2, // v10: reduced from 0.25
+    nflEpa: 0.1, // v10: EPA-based scoring environment signal
+    weather: 0.1, // v10: Open-Meteo weather impact on totals
   },
   NCAAF: {
-    modelEdge: 0.3, // SP+ efficiency ratings (up from 0.20 with power ratings)
-    seasonOU: 0.15,
+    modelEdge: 0.25, // v10: reduced from 0.30 for weather
+    seasonOU: 0.1, // v10: reduced from 0.15
     trendAngles: 0.2,
     recentForm: 0.15,
     h2hWeather: 0.2,
+    weather: 0.1, // v10: Open-Meteo weather impact on totals
   },
   NBA: {
-    modelEdge: 0.25,
-    seasonOU: 0.2,
+    modelEdge: 0.2, // v10: reduced from 0.25 for nbaFourFactors
+    seasonOU: 0.15, // v10: reduced from 0.20
     trendAngles: 0.2,
     recentForm: 0.15,
     h2hWeather: 0.05,
     tempoDiff: 0.15,
+    nbaFourFactors: 0.1, // v10: Four Factors efficiency O/U signal
   },
 };
 
@@ -2325,6 +2342,71 @@ export async function generateDailyPicks(
                     game.overUnder
                   );
 
+          // ── v10: Pre-fetch new data source signals ──
+          // Elo edge — available for all sports
+          const eloSignal = await signalEloEdge(
+            game.homeTeam,
+            game.awayTeam,
+            sport as Sport,
+            game.spread
+          ).catch(() => null);
+
+          // Sport-specific signals (pre-fetched to use in both spread & O/U)
+          let nflEpaResult: {
+            spread: SignalResult;
+            ou: SignalResult;
+          } | null = null;
+          let nbaFactorsResult: {
+            spread: SignalResult;
+            ou: SignalResult;
+          } | null = null;
+          let bartSpreadSignal: SignalResult | null = null;
+          let bartOUSignal: SignalResult | null = null;
+          let weatherSignal: SignalResult | null = null;
+
+          if (sport === "NFL") {
+            [nflEpaResult, weatherSignal] = await Promise.all([
+              signalNFLEPA(
+                game.homeTeam,
+                game.awayTeam,
+                game.spread,
+                game.overUnder
+              ).catch(() => null),
+              signalWeather(sport, dateStr, game.homeTeam, game.awayTeam).catch(
+                () => null
+              ),
+            ]);
+          } else if (sport === "NCAAF") {
+            weatherSignal = await signalWeather(
+              sport,
+              dateStr,
+              game.homeTeam,
+              game.awayTeam
+            ).catch(() => null);
+          } else if (sport === "NCAAMB") {
+            [bartSpreadSignal, bartOUSignal] = await Promise.all([
+              signalBarttovikEnsemble(
+                game.homeTeam,
+                game.awayTeam,
+                game.spread,
+                null
+              ).catch(() => null),
+              signalBarttovikEnsemble(
+                game.homeTeam,
+                game.awayTeam,
+                null,
+                game.overUnder
+              ).catch(() => null),
+            ]);
+          } else if (sport === "NBA") {
+            nbaFactorsResult = await signalNBAFourFactors(
+              game.homeTeam,
+              game.awayTeam,
+              game.spread,
+              game.overUnder
+            ).catch(() => null);
+          }
+
           // ── Score Spread ──
           if (game.spread !== null) {
             // v6: Look up FanMatch HomeWP for moneyline edge signal
@@ -2353,6 +2435,13 @@ export async function generateDailyPicks(
                 gameFM?.HomeWP ?? null
               ),
             ];
+
+            // v10: Add new data source signals (graceful — null signals are skipped)
+            if (eloSignal) spreadSignals.push(eloSignal);
+            if (nflEpaResult?.spread) spreadSignals.push(nflEpaResult.spread);
+            if (nbaFactorsResult?.spread)
+              spreadSignals.push(nbaFactorsResult.spread);
+            if (bartSpreadSignal) spreadSignals.push(bartSpreadSignal);
 
             // v5: skip convergence bonus + require min 3 active signals
             const result = computeConvergenceScore(
@@ -2423,6 +2512,12 @@ export async function generateDailyPicks(
                 signalTempoDiff(kenpomRatings, game.homeTeam, game.awayTeam)
               );
             }
+
+            // v10: Add new data source O/U signals (graceful — null signals are skipped)
+            if (nflEpaResult?.ou) ouSignals.push(nflEpaResult.ou);
+            if (nbaFactorsResult?.ou) ouSignals.push(nbaFactorsResult.ou);
+            if (bartOUSignal) ouSignals.push(bartOUSignal);
+            if (weatherSignal) ouSignals.push(weatherSignal);
 
             // v5: skip O/U convergence bonus + require min 3 active signals
             const result = computeConvergenceScore(

@@ -57,16 +57,16 @@ enum UserRole {
 
 model Team {
   id           Int       @id @default(autoincrement())
-  name         String    // "Kansas City Chiefs"
-  abbreviation String    // "KC"
+  name         String // "Kansas City Chiefs"
+  abbreviation String // "KC"
   sport        Sport
-  conference   String    // "AFC", "Big 12", "SEC"
-  division     String?   // "West" — nullable for college
-  venue        String?   // "GEHA Field at Arrowhead Stadium"
+  conference   String // "AFC", "Big 12", "SEC"
+  division     String? // "West" — nullable for college
+  venue        String? // "GEHA Field at Arrowhead Stadium"
   venueType    VenueType @default(OUTDOOR)
   city         String
   state        String
-  latitude     Float?    // For weather API lookups
+  latitude     Float? // For weather API lookups
   longitude    Float?
   createdAt    DateTime  @default(now())
 
@@ -93,6 +93,13 @@ model Team {
   // Name mapping
   nameMapping TeamNameMapping[]
 
+  // New data source relations
+  nbaTeamStats       NBATeamStats[]
+  nflTeamEpa         NFLTeamEPA[]
+  eloRatings         EloRating[]
+  ncaafAdvancedStats NCAAFAdvancedStats[]
+  barttovikSnapshots BarttovikSnapshot[]
+
   @@unique([sport, name])
   @@index([sport])
   @@index([sport, conference])
@@ -103,32 +110,32 @@ model Team {
 model NFLGame {
   id              Int              @id @default(autoincrement())
   season          Int
-  week            String           // "1"-"18", "WildCard", "Division", "ConfChamp", "SuperBowl"
-  dayOfWeek       String           // "Sun", "Mon", "Thu", "Sat", "Fri"
+  week            String // "1"-"18", "WildCard", "Division", "ConfChamp", "SuperBowl"
+  dayOfWeek       String // "Sun", "Mon", "Thu", "Sat", "Fri"
   gameDate        DateTime
-  kickoffTime     String?          // "8:20 PM" ET
+  kickoffTime     String? // "8:20 PM" ET
   homeTeamId      Int
   homeTeam        Team             @relation("NFLHomeTeam", fields: [homeTeamId], references: [id])
   awayTeamId      Int
   awayTeam        Team             @relation("NFLAwayTeam", fields: [awayTeamId], references: [id])
   homeScore       Int?
   awayScore       Int?
-  scoreDifference Int?             // homeScore - awayScore (signed: positive = home win)
+  scoreDifference Int? // homeScore - awayScore (signed: positive = home win)
   winnerId        Int?
   winner          Team?            @relation("NFLWinner", fields: [winnerId], references: [id])
   isPrimetime     Boolean          @default(false)
-  primetimeSlot   String?          // "MNF", "SNF", "TNF", "Saturday Primetime"
-  temperature     Float?           // °F
-  windMph         Float?           // Parsed numeric
+  primetimeSlot   String? // "MNF", "SNF", "TNF", "Saturday Primetime"
+  temperature     Float? // °F
+  windMph         Float? // Parsed numeric
   weatherCategory WeatherCategory?
-  weatherRaw      String?          // Original freeform text
-  spread          Float?           // Negative = home favored
-  overUnder       Float?           // Total points line
+  weatherRaw      String? // Original freeform text
+  spread          Float? // Negative = home favored
+  overUnder       Float? // Total points line
   spreadResult    SpreadResult?
   ouResult        OUResult?
   isPlayoff       Boolean          @default(false)
   isNeutralSite   Boolean          @default(false)
-  source          String?          // Data provenance
+  source          String? // Data provenance
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 
@@ -154,7 +161,7 @@ model NFLGame {
 model NCAAFGame {
   id               Int              @id @default(autoincrement())
   season           Int
-  week             String           // "1"-"15+", "Bowl", "CFP"
+  week             String // "1"-"15+", "Bowl", "CFP"
   dayOfWeek        String
   gameDate         DateTime
   kickoffTime      String?
@@ -164,29 +171,29 @@ model NCAAFGame {
   awayTeam         Team             @relation("NCAAFAwayTeam", fields: [awayTeamId], references: [id])
   homeScore        Int?
   awayScore        Int?
-  scoreDifference  Int?             // homeScore - awayScore (signed)
+  scoreDifference  Int? // homeScore - awayScore (signed)
   winnerId         Int?
   winner           Team?            @relation("NCAAFWinner", fields: [winnerId], references: [id])
-  homeRank         Int?             // AP ranking at game time
+  homeRank         Int? // AP ranking at game time
   awayRank         Int?
   isConferenceGame Boolean          @default(false)
   isBowlGame       Boolean          @default(false)
-  bowlName         String?          // "Rose Bowl", "CFP Semifinal", etc.
+  bowlName         String? // "Rose Bowl", "CFP Semifinal", etc.
   isPrimetime      Boolean          @default(false)
   primetimeSlot    String?
   temperature      Float?
   windMph          Float?
   weatherCategory  WeatherCategory?
   weatherRaw       String?
-  spread           Float?           // Negative = home favored
+  spread           Float? // Negative = home favored
   overUnder        Float?
   spreadResult     SpreadResult?
   ouResult         OUResult?
-  homeSpOverall    Float?           // SP+ overall rating
+  homeSpOverall    Float? // SP+ overall rating
   awaySpOverall    Float?
-  homeSpOffense    Float?           // SP+ offensive rating
+  homeSpOffense    Float? // SP+ offensive rating
   awaySpOffense    Float?
-  homeSpDefense    Float?           // SP+ defensive rating
+  homeSpDefense    Float? // SP+ defensive rating
   awaySpDefense    Float?
   moneylineHome    Int?
   moneylineAway    Int?
@@ -215,58 +222,58 @@ model NCAAFGame {
 // ─── NCAAMB GAMES ───────────────────────────────────────────────────────────
 
 model NCAAMBGame {
-  id               Int           @id @default(autoincrement())
-  season           Int           // Year the season ends (2024 = 2023-24 season)
-  gameDate         DateTime
-  tipoffTime       String?
-  homeTeamId       Int
-  homeTeam         Team          @relation("NCAAMBHomeTeam", fields: [homeTeamId], references: [id])
-  awayTeamId       Int
-  awayTeam         Team          @relation("NCAAMBAwayTeam", fields: [awayTeamId], references: [id])
-  homeScore        Int?
-  awayScore        Int?
-  scoreDifference  Int?          // homeScore - awayScore (signed)
-  winnerId         Int?
-  winner           Team?         @relation("NCAAMBWinner", fields: [winnerId], references: [id])
-  homeRank         Int?          // AP ranking at game time
-  awayRank         Int?
-  homeSeed         Int?          // NCAA tournament seed (1-16)
-  awaySeed         Int?
-  isConferenceGame Boolean       @default(false)
-  isNeutralSite    Boolean       @default(false)
-  isTournament     Boolean       @default(false) // NCAA March Madness
-  tournamentRound  String?       // "First Four", "Round of 64", "Sweet 16", etc.
-  tournamentRegion String?       // "East", "West", "South", "Midwest"
-  isNIT            Boolean       @default(false)
-  isConferenceTourney Boolean    @default(false)
+  id                  Int           @id @default(autoincrement())
+  season              Int // Year the season ends (2024 = 2023-24 season)
+  gameDate            DateTime
+  tipoffTime          String?
+  homeTeamId          Int
+  homeTeam            Team          @relation("NCAAMBHomeTeam", fields: [homeTeamId], references: [id])
+  awayTeamId          Int
+  awayTeam            Team          @relation("NCAAMBAwayTeam", fields: [awayTeamId], references: [id])
+  homeScore           Int?
+  awayScore           Int?
+  scoreDifference     Int? // homeScore - awayScore (signed)
+  winnerId            Int?
+  winner              Team?         @relation("NCAAMBWinner", fields: [winnerId], references: [id])
+  homeRank            Int? // AP ranking at game time
+  awayRank            Int?
+  homeSeed            Int? // NCAA tournament seed (1-16)
+  awaySeed            Int?
+  isConferenceGame    Boolean       @default(false)
+  isNeutralSite       Boolean       @default(false)
+  isTournament        Boolean       @default(false) // NCAA March Madness
+  tournamentRound     String? // "First Four", "Round of 64", "Sweet 16", etc.
+  tournamentRegion    String? // "East", "West", "South", "Midwest"
+  isNIT               Boolean       @default(false)
+  isConferenceTourney Boolean       @default(false)
   // KenPom ratings (season-level for each team)
-  homeKenpomRank   Int?          // KenPom overall ranking
-  awayKenpomRank   Int?
-  homeAdjEM        Float?        // Adjusted efficiency margin
-  awayAdjEM        Float?
-  homeAdjOE        Float?        // Adjusted offensive efficiency
-  awayAdjOE        Float?
-  homeAdjDE        Float?        // Adjusted defensive efficiency
-  awayAdjDE        Float?
-  homeAdjTempo     Float?        // Adjusted tempo
-  awayAdjTempo     Float?
+  homeKenpomRank      Int? // KenPom overall ranking
+  awayKenpomRank      Int?
+  homeAdjEM           Float? // Adjusted efficiency margin
+  awayAdjEM           Float?
+  homeAdjOE           Float? // Adjusted offensive efficiency
+  awayAdjOE           Float?
+  homeAdjDE           Float? // Adjusted defensive efficiency
+  awayAdjDE           Float?
+  homeAdjTempo        Float? // Adjusted tempo
+  awayAdjTempo        Float?
   // FanMatch predictions (game-level)
-  fmHomePred       Float?        // Predicted home score
-  fmAwayPred       Float?        // Predicted away score
-  fmHomeWinProb    Float?        // Home win probability (0-100)
-  fmThrillScore    Float?        // KenPom thrill score
+  fmHomePred          Float? // Predicted home score
+  fmAwayPred          Float? // Predicted away score
+  fmHomeWinProb       Float? // Home win probability (0-100)
+  fmThrillScore       Float? // KenPom thrill score
   // Betting
-  spread           Float?        // Negative = home favored
-  overUnder        Float?
-  moneylineHome    Int?          // e.g., -150
-  moneylineAway    Int?          // e.g., +130
-  spreadResult     SpreadResult?
-  ouResult         OUResult?
-  overtimes        Int           @default(0)
+  spread              Float? // Negative = home favored
+  overUnder           Float?
+  moneylineHome       Int? // e.g., -150
+  moneylineAway       Int? // e.g., +130
+  spreadResult        SpreadResult?
+  ouResult            OUResult?
+  overtimes           Int           @default(0)
   // NO weather fields — basketball is indoors
-  source           String?
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  source              String?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
 
   @@unique([gameDate, homeTeamId, awayTeamId])
   @@index([season])
@@ -285,38 +292,38 @@ model NCAAMBGame {
 // ─── NBA GAMES ─────────────────────────────────────────────────────────────
 
 model NBAGame {
-  id              Int              @id @default(autoincrement())
-  season          Int              // Year the season ends (2026 = 2025-26 season)
+  id              Int           @id @default(autoincrement())
+  season          Int // Year the season ends (2026 = 2025-26 season)
   gameDate        DateTime
-  tipoffTime      String?          // "7:30 PM" ET
-  dayOfWeek       String           // "Mon", "Tue", etc.
+  tipoffTime      String? // "7:30 PM" ET
+  dayOfWeek       String // "Mon", "Tue", etc.
   homeTeamId      Int
-  homeTeam        Team             @relation("NBAHomeTeam", fields: [homeTeamId], references: [id])
+  homeTeam        Team          @relation("NBAHomeTeam", fields: [homeTeamId], references: [id])
   awayTeamId      Int
-  awayTeam        Team             @relation("NBAAwayTeam", fields: [awayTeamId], references: [id])
+  awayTeam        Team          @relation("NBAAwayTeam", fields: [awayTeamId], references: [id])
   homeScore       Int?
   awayScore       Int?
-  scoreDifference Int?             // homeScore - awayScore (signed)
+  scoreDifference Int? // homeScore - awayScore (signed)
   winnerId        Int?
-  winner          Team?            @relation("NBAWinner", fields: [winnerId], references: [id])
-  isPrimetime     Boolean          @default(false)
-  primetimeSlot   String?          // "National TV", "ESPN", "TNT"
-  isPlayoff       Boolean          @default(false)
-  playoffRound    String?          // "Play-In", "First Round", "Conference Semis", etc.
-  isAllStar       Boolean          @default(false)
-  isNeutralSite   Boolean          @default(false)
+  winner          Team?         @relation("NBAWinner", fields: [winnerId], references: [id])
+  isPrimetime     Boolean       @default(false)
+  primetimeSlot   String? // "National TV", "ESPN", "TNT"
+  isPlayoff       Boolean       @default(false)
+  playoffRound    String? // "Play-In", "First Round", "Conference Semis", etc.
+  isAllStar       Boolean       @default(false)
+  isNeutralSite   Boolean       @default(false)
   // Betting
-  spread          Float?           // Negative = home favored
+  spread          Float? // Negative = home favored
   overUnder       Float?
-  moneylineHome   Int?             // e.g., -150
-  moneylineAway   Int?             // e.g., +130
+  moneylineHome   Int? // e.g., -150
+  moneylineAway   Int? // e.g., +130
   spreadResult    SpreadResult?
   ouResult        OUResult?
-  overtimes       Int              @default(0)
+  overtimes       Int           @default(0)
   // NO weather fields — basketball is indoors
   source          String?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
   @@unique([gameDate, homeTeamId, awayTeamId])
   @@index([season])
@@ -337,22 +344,22 @@ model UpcomingGame {
   id               Int              @id @default(autoincrement())
   sport            Sport
   gameDate         DateTime
-  homeTeam         String           // Store as string for flexibility
+  homeTeam         String // Store as string for flexibility
   awayTeam         String
-  homeRank         Int?             // AP ranking (1-25, null = unranked)
+  homeRank         Int? // AP ranking (1-25, null = unranked)
   awayRank         Int?
-  spread           Float?           // Current consensus spread
+  spread           Float? // Current consensus spread
   overUnder        Float?
-  moneylineHome    Int?             // e.g., -150
-  moneylineAway    Int?             // e.g., +130
+  moneylineHome    Int? // e.g., -150
+  moneylineAway    Int? // e.g., +130
   forecastTemp     Float?
   forecastWindMph  Float?
   forecastCategory WeatherCategory?
   forecastUpdated  DateTime?
   isNeutralSite    Boolean          @default(false)
-  fmHomePred       Float?           // FanMatch predicted home score
-  fmAwayPred       Float?           // FanMatch predicted away score
-  fmHomeWinProb    Float?           // FanMatch home win probability (0-1)
+  fmHomePred       Float? // FanMatch predicted home score
+  fmAwayPred       Float? // FanMatch predicted away score
+  fmHomeWinProb    Float? // FanMatch home win probability (0-1)
   lastUpdated      DateTime         @updatedAt
 
   @@unique([sport, gameDate, homeTeam, awayTeam])
@@ -362,16 +369,16 @@ model UpcomingGame {
 // ─── ODDS SNAPSHOTS (Multi-book odds from The Odds API) ─────────────────────
 
 model OddsSnapshot {
-  id            Int      @id @default(autoincrement())
-  sport         Sport
-  gameDate      DateTime
-  homeTeam      String
-  awayTeam      String
-  externalId    String   // The Odds API game ID
-  bookmakers    Json     // Array of ParsedOdds per bookmaker
-  bestSpread    Float?   // Best available spread for home
-  bestTotal     Float?   // Consensus total
-  fetchedAt     DateTime @default(now())
+  id         Int      @id @default(autoincrement())
+  sport      Sport
+  gameDate   DateTime
+  homeTeam   String
+  awayTeam   String
+  externalId String // The Odds API game ID
+  bookmakers Json // Array of ParsedOdds per bookmaker
+  bestSpread Float? // Best available spread for home
+  bestTotal  Float? // Consensus total
+  fetchedAt  DateTime @default(now())
 
   @@unique([externalId, fetchedAt])
   @@index([sport, gameDate])
@@ -382,19 +389,19 @@ model OddsSnapshot {
 // ─── SAVED TRENDS ───────────────────────────────────────────────────────────
 
 model SavedTrend {
-  id              Int      @id @default(autoincrement())
-  userId          String
-  name            String   // User-assigned name ("Chiefs ATS home favorites")
-  sport           Sport
-  query           Json     // Full TrendQuery object for replay
-  description     String?  // Auto-generated summary
-  lastResult      Json?    // Latest trigger result snapshot
-  lastTriggered   DateTime?
-  notifyEmail     Boolean  @default(false)
-  isPublic        Boolean  @default(false) // Visible on community leaderboard
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  user            User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  id            Int       @id @default(autoincrement())
+  userId        String
+  name          String // User-assigned name ("Chiefs ATS home favorites")
+  sport         Sport
+  query         Json // Full TrendQuery object for replay
+  description   String? // Auto-generated summary
+  lastResult    Json? // Latest trigger result snapshot
+  lastTriggered DateTime?
+  notifyEmail   Boolean   @default(false)
+  isPublic      Boolean   @default(false) // Visible on community leaderboard
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  user          User      @relation(fields: [userId], references: [id], onDelete: Restrict)
 
   @@index([userId])
   @@index([sport])
@@ -404,18 +411,18 @@ model SavedTrend {
 // ─── AUTH (NextAuth.js v5) ──────────────────────────────────────────────────
 
 model User {
-  id                 String    @id @default(cuid())
-  email              String    @unique
+  id                 String             @id @default(cuid())
+  email              String             @unique
   name               String?
   image              String?
   password           String?
-  role               UserRole  @default(FREE)
-  stripeCustomerId   String?   @unique // Stripe customer ID for billing
-  subscriptionId     String?   // Stripe subscription ID
-  subscriptionStatus String?   // "active", "canceled", "past_due", etc.
+  role               UserRole           @default(FREE)
+  stripeCustomerId   String?            @unique // Stripe customer ID for billing
+  subscriptionId     String? // Stripe subscription ID
+  subscriptionStatus String? // "active", "canceled", "past_due", etc.
   emailVerified      DateTime?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
   accounts           Account[]
   sessions           Session[]
   searches           SearchLog[]
@@ -464,15 +471,15 @@ model VerificationToken {
 // ─── SEARCH LOGGING ─────────────────────────────────────────────────────────
 
 model SearchLog {
-  id        Int      @id @default(autoincrement())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  query     String   // Raw natural language query
-  sport     Sport?
-  filters   String?  // JSON of interpreted filters
-  results   Int      // Number of results returned
-  durationMs Int?    // Query execution time
-  createdAt DateTime @default(now())
+  id         Int      @id @default(autoincrement())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  query      String // Raw natural language query
+  sport      Sport?
+  filters    String? // JSON of interpreted filters
+  results    Int // Number of results returned
+  durationMs Int? // Query execution time
+  createdAt  DateTime @default(now())
 
   @@index([userId])
   @@index([createdAt])
@@ -481,28 +488,28 @@ model SearchLog {
 // ─── PLAYER GAME LOGS ──────────────────────────────────────────────────────
 
 model PlayerGameLog {
-  id              Int       @id @default(autoincrement())
-  playerId        String    // nflverse player ID
-  playerName      String    // display name
-  position        String    // "QB", "WR", etc.
-  positionGroup   String    // "QB", "RB", "WR", "TE", "K", "DL", "LB", "DB", "OL"
-  season          Int
-  week            Int
-  seasonType      String    @default("REG")  // "REG" | "POST"
-  team            String    // abbreviation ("KC")
-  opponentTeam    String    // abbreviation ("BUF")
-  gameDate        DateTime?
-  isHome          Boolean?
-  teamScore       Int?
-  opponentScore   Int?
-  gameResult      String?   // "W" | "L" | "T"
-  spread          Float?
-  overUnder       Float?
-  spreadResult    String?   // "COVERED" | "LOST" | "PUSH"
-  ouResult        String?   // "OVER" | "UNDER" | "PUSH"
-  isPlayoff       Boolean   @default(false)
-  isPrimetime     Boolean?
-  stats           Json      @default("{}")  // All stat fields + metadata as JSONB
+  id            Int       @id @default(autoincrement())
+  playerId      String // nflverse player ID
+  playerName    String // display name
+  position      String // "QB", "WR", etc.
+  positionGroup String // "QB", "RB", "WR", "TE", "K", "DL", "LB", "DB", "OL"
+  season        Int
+  week          Int
+  seasonType    String    @default("REG") // "REG" | "POST"
+  team          String // abbreviation ("KC")
+  opponentTeam  String // abbreviation ("BUF")
+  gameDate      DateTime?
+  isHome        Boolean?
+  teamScore     Int?
+  opponentScore Int?
+  gameResult    String? // "W" | "L" | "T"
+  spread        Float?
+  overUnder     Float?
+  spreadResult  String? // "COVERED" | "LOST" | "PUSH"
+  ouResult      String? // "OVER" | "UNDER" | "PUSH"
+  isPlayoff     Boolean   @default(false)
+  isPrimetime   Boolean?
+  stats         Json      @default("{}") // All stat fields + metadata as JSONB
 
   @@index([playerId, season])
   @@index([playerName])
@@ -530,32 +537,32 @@ enum BetResult {
 }
 
 model Bet {
-  id          String    @id @default(cuid())
-  userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Restrict)
-  sport       Sport
-  betType     BetType
-  gameDate    DateTime
-  homeTeam    String
-  awayTeam    String
-  pickSide    String    // "home", "away", "over", "under", player name for props
-  line        Float?    // spread/total line
-  oddsValue   Int       @default(-110) // American odds: -110, +150, etc.
-  stake       Float     // amount wagered
-  toWin       Float     // amount to win (calculated from odds)
-  result      BetResult @default(PENDING)
-  profit      Float?    // + for win, - for loss, 0 for push (calculated on grading)
-  sportsbook  String?   // "DraftKings", "FanDuel", etc.
-  playerName  String?   // for PLAYER_PROP bets
-  propStat    String?   // "passing_yards", "rushing_yards", etc.
-  propLine    Float?    // prop-specific line
-  notes       String?   // user notes
-  parlayLegs  Json?     // for PARLAY/TEASER: [{homeTeam, awayTeam, pickSide, line}]
-  teaserPoints Float?   // for TEASER: points added (e.g., 6)
-  dailyPickId Int?      // link to DailyPick if bet originated from a pick
-  gradedAt    DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  sport        Sport
+  betType      BetType
+  gameDate     DateTime
+  homeTeam     String
+  awayTeam     String
+  pickSide     String // "home", "away", "over", "under", player name for props
+  line         Float? // spread/total line
+  oddsValue    Int       @default(-110) // American odds: -110, +150, etc.
+  stake        Float // amount wagered
+  toWin        Float // amount to win (calculated from odds)
+  result       BetResult @default(PENDING)
+  profit       Float? // + for win, - for loss, 0 for push (calculated on grading)
+  sportsbook   String? // "DraftKings", "FanDuel", etc.
+  playerName   String? // for PLAYER_PROP bets
+  propStat     String? // "passing_yards", "rushing_yards", etc.
+  propLine     Float? // prop-specific line
+  notes        String? // user notes
+  parlayLegs   Json? // for PARLAY/TEASER: [{homeTeam, awayTeam, pickSide, line}]
+  teaserPoints Float? // for TEASER: points added (e.g., 6)
+  dailyPickId  Int? // link to DailyPick if bet originated from a pick
+  gradedAt     DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   @@index([userId])
   @@index([userId, result])
@@ -569,29 +576,29 @@ model Bet {
 // ─── DAILY PICKS ─────────────────────────────────────────────────────────
 
 model DailyPick {
-  id          Int      @id @default(autoincrement())
-  date        DateTime @db.Date
+  id          Int       @id @default(autoincrement())
+  date        DateTime  @db.Date
   sport       Sport
-  pickType    String   // SPREAD, OVER_UNDER, PLAYER_PROP
+  pickType    String // SPREAD, OVER_UNDER, PLAYER_PROP
   homeTeam    String
   awayTeam    String
   gameDate    DateTime
-  pickSide    String   // home, away, over, under
+  pickSide    String // home, away, over, under
   line        Float?
-  pickLabel   String   // "Chiefs -7" or "Over 48.5" or "Mahomes Over 275.5 Pass Yds"
+  pickLabel   String // "Chiefs -7" or "Over 48.5" or "Mahomes Over 275.5 Pass Yds"
   playerName  String?
   propStat    String?
   propLine    Float?
-  trendScore  Int      // 0-100
-  confidence  Int      // 3, 4, or 5
+  trendScore  Int // 0-100
+  confidence  Int // 3, 4, or 5
   headline    String
-  reasoning   Json     // [{angle, weight, strength, record}]
+  reasoning   Json // [{angle, weight, strength, record}]
   homeRank    Int?
   awayRank    Int?
-  result      String   @default("PENDING") // WIN, LOSS, PUSH, PENDING
+  result      String    @default("PENDING") // WIN, LOSS, PUSH, PENDING
   actualValue Float?
   gradedAt    DateTime?
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
 
   @@unique([date, sport, homeTeam, awayTeam, pickType, pickSide, playerName])
   @@index([date, sport])
@@ -606,8 +613,8 @@ model PushSubscription {
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   endpoint  String   @unique
-  p256dh    String   // Public key
-  auth      String   // Auth secret
+  p256dh    String // Public key
+  auth      String // Auth secret
   createdAt DateTime @default(now())
 
   @@index([userId])
@@ -618,8 +625,8 @@ model PushSubscription {
 model KenpomSnapshot {
   id           Int      @id @default(autoincrement())
   snapshotDate DateTime // The date this rating snapshot is from
-  season       Int      // KenPom season (ending year)
-  teamName     String   // KenPom team name (e.g. "Michigan St.")
+  season       Int // KenPom season (ending year)
+  teamName     String // KenPom team name (e.g. "Michigan St.")
   adjEM        Float
   adjOE        Float
   adjDE        Float
@@ -637,25 +644,25 @@ model KenpomSnapshot {
 // ─── KENPOM POINT DISTRIBUTION ──────────────────────────────────────────────
 
 model KenpomPointDist {
-  id          Int      @id @default(autoincrement())
-  season      Int
-  teamName    String
-  confShort   String
+  id         Int      @id @default(autoincrement())
+  season     Int
+  teamName   String
+  confShort  String
   // Offensive scoring distribution (% of points from each source)
-  offFt       Float    // % from free throws
-  offFg2      Float    // % from 2-point FGs
-  offFg3      Float    // % from 3-point FGs
-  rankOffFt   Int
-  rankOffFg2  Int
-  rankOffFg3  Int
+  offFt      Float // % from free throws
+  offFg2     Float // % from 2-point FGs
+  offFg3     Float // % from 3-point FGs
+  rankOffFt  Int
+  rankOffFg2 Int
+  rankOffFg3 Int
   // Defensive scoring distribution
-  defFt       Float
-  defFg2      Float
-  defFg3      Float
-  rankDefFt   Int
-  rankDefFg2  Int
-  rankDefFg3  Int
-  createdAt   DateTime @default(now())
+  defFt      Float
+  defFg2     Float
+  defFg3     Float
+  rankDefFt  Int
+  rankDefFg2 Int
+  rankDefFg3 Int
+  createdAt  DateTime @default(now())
 
   @@unique([season, teamName])
   @@index([season])
@@ -665,31 +672,31 @@ model KenpomPointDist {
 // ─── KENPOM HEIGHT / EXPERIENCE ─────────────────────────────────────────────
 
 model KenpomHeight {
-  id            Int      @id @default(autoincrement())
-  season        Int
-  teamName      String
-  confShort     String
-  avgHgt        Float    // Average height (inches)
-  avgHgtRank    Int
-  hgtEff        Float    // Height-adjusted efficiency
-  hgtEffRank    Int
-  hgt5          Float    // C height
-  hgt5Rank      Int
-  hgt4          Float    // PF height
-  hgt4Rank      Int
-  hgt3          Float    // SF height
-  hgt3Rank      Int
-  hgt2          Float    // SG height
-  hgt2Rank      Int
-  hgt1          Float    // PG height
-  hgt1Rank      Int
-  exp           Float    // Experience (years)
-  expRank       Int
-  bench         Float    // Bench minutes share
-  benchRank     Int
-  continuity    Float    // Roster continuity %
+  id             Int      @id @default(autoincrement())
+  season         Int
+  teamName       String
+  confShort      String
+  avgHgt         Float // Average height (inches)
+  avgHgtRank     Int
+  hgtEff         Float // Height-adjusted efficiency
+  hgtEffRank     Int
+  hgt5           Float // C height
+  hgt5Rank       Int
+  hgt4           Float // PF height
+  hgt4Rank       Int
+  hgt3           Float // SF height
+  hgt3Rank       Int
+  hgt2           Float // SG height
+  hgt2Rank       Int
+  hgt1           Float // PG height
+  hgt1Rank       Int
+  exp            Float // Experience (years)
+  expRank        Int
+  bench          Float // Bench minutes share
+  benchRank      Int
+  continuity     Float // Roster continuity %
   continuityRank Int
-  createdAt     DateTime @default(now())
+  createdAt      DateTime @default(now())
 
   @@unique([season, teamName])
   @@index([season])
@@ -699,36 +706,36 @@ model KenpomHeight {
 // ─── KENPOM FOUR FACTORS ──────────────────────────────────────────────────
 
 model KenpomFourFactors {
-  id             Int      @id @default(autoincrement())
-  season         Int
-  teamName       String
-  confShort      String
+  id            Int      @id @default(autoincrement())
+  season        Int
+  teamName      String
+  confShort     String
   // Tempo
-  adjTempo       Float
-  rankAdjTempo   Int
+  adjTempo      Float
+  rankAdjTempo  Int
   // Offense
-  adjOE          Float
-  rankAdjOE      Int
-  offEfgPct      Float    // Effective FG%
-  rankOffEfgPct  Int
-  offToPct       Float    // Turnover %
-  rankOffToPct   Int
-  offOrPct       Float    // Offensive rebound %
-  rankOffOrPct   Int
-  offFtRate      Float    // Free throw rate (FTA/FGA)
-  rankOffFtRate  Int
+  adjOE         Float
+  rankAdjOE     Int
+  offEfgPct     Float // Effective FG%
+  rankOffEfgPct Int
+  offToPct      Float // Turnover %
+  rankOffToPct  Int
+  offOrPct      Float // Offensive rebound %
+  rankOffOrPct  Int
+  offFtRate     Float // Free throw rate (FTA/FGA)
+  rankOffFtRate Int
   // Defense
-  adjDE          Float
-  rankAdjDE      Int
-  defEfgPct      Float
-  rankDefEfgPct  Int
-  defToPct       Float    // Forced turnover %
-  rankDefToPct   Int
-  defOrPct       Float    // Defensive rebound % (opponent OR%)
-  rankDefOrPct   Int
-  defFtRate      Float
-  rankDefFtRate  Int
-  createdAt      DateTime @default(now())
+  adjDE         Float
+  rankAdjDE     Int
+  defEfgPct     Float
+  rankDefEfgPct Int
+  defToPct      Float // Forced turnover %
+  rankDefToPct  Int
+  defOrPct      Float // Defensive rebound % (opponent OR%)
+  rankDefOrPct  Int
+  defFtRate     Float
+  rankDefFtRate Int
+  createdAt     DateTime @default(now())
 
   @@unique([season, teamName])
   @@index([season])
@@ -738,53 +745,53 @@ model KenpomFourFactors {
 // ─── KENPOM TEAM STATS ───────────────────────────────────────────────────
 
 model KenpomTeamStats {
-  id             Int      @id @default(autoincrement())
-  season         Int
-  teamName       String
-  confShort      String
+  id            Int      @id @default(autoincrement())
+  season        Int
+  teamName      String
+  confShort     String
   // Offensive stats
-  off3pPct       Float    // 3-point %
-  rankOff3pPct   Int
-  off2pPct       Float    // 2-point %
-  rankOff2pPct   Int
-  offFtPct       Float    // Free throw %
-  rankOffFtPct   Int
-  offBlkPct      Float    // Block %
-  rankOffBlkPct  Int
-  offStlPct      Float    // Steal %
-  rankOffStlPct  Int
-  offNstPct      Float    // Non-steal turnover %
-  rankOffNstPct  Int
-  off2pDist      Float    // 2-point FGA distribution
-  rankOff2pDist  Int
-  offAstPct      Float    // Assist %
-  rankOffAstPct  Int
-  off3paPct      Float    // 3-point attempt % of FGA
-  rankOff3paPct  Int
-  offAdjOE       Float    // Adjusted offensive efficiency
-  rankOffAdjOE   Int
+  off3pPct      Float // 3-point %
+  rankOff3pPct  Int
+  off2pPct      Float // 2-point %
+  rankOff2pPct  Int
+  offFtPct      Float // Free throw %
+  rankOffFtPct  Int
+  offBlkPct     Float // Block %
+  rankOffBlkPct Int
+  offStlPct     Float // Steal %
+  rankOffStlPct Int
+  offNstPct     Float // Non-steal turnover %
+  rankOffNstPct Int
+  off2pDist     Float // 2-point FGA distribution
+  rankOff2pDist Int
+  offAstPct     Float // Assist %
+  rankOffAstPct Int
+  off3paPct     Float // 3-point attempt % of FGA
+  rankOff3paPct Int
+  offAdjOE      Float // Adjusted offensive efficiency
+  rankOffAdjOE  Int
   // Defensive stats
-  def3pPct       Float
-  rankDef3pPct   Int
-  def2pPct       Float
-  rankDef2pPct   Int
-  defFtPct       Float
-  rankDefFtPct   Int
-  defBlkPct      Float
-  rankDefBlkPct  Int
-  defStlPct      Float
-  rankDefStlPct  Int
-  defNstPct      Float
-  rankDefNstPct  Int
-  def2pDist      Float
-  rankDef2pDist  Int
-  defAstPct      Float
-  rankDefAstPct  Int
-  def3paPct      Float
-  rankDef3paPct  Int
-  defAdjDE       Float
-  rankDefAdjDE   Int
-  createdAt      DateTime @default(now())
+  def3pPct      Float
+  rankDef3pPct  Int
+  def2pPct      Float
+  rankDef2pPct  Int
+  defFtPct      Float
+  rankDefFtPct  Int
+  defBlkPct     Float
+  rankDefBlkPct Int
+  defStlPct     Float
+  rankDefStlPct Int
+  defNstPct     Float
+  rankDefNstPct Int
+  def2pDist     Float
+  rankDef2pDist Int
+  defAstPct     Float
+  rankDefAstPct Int
+  def3paPct     Float
+  rankDef3paPct Int
+  defAdjDE      Float
+  rankDefAdjDE  Int
+  createdAt     DateTime @default(now())
 
   @@unique([season, teamName])
   @@index([season])
@@ -794,23 +801,23 @@ model KenpomTeamStats {
 // ─── KENPOM HOME COURT ADVANTAGE ─────────────────────────────────────────
 
 model KenpomHCA {
-  id           Int      @id @default(autoincrement())
-  season       Int
-  teamName     String
-  confShort    String
-  hca          Float    // Home court advantage in points
-  rankHca      Int
-  pfDiff       Float    // Personal fouls diff (home vs road)
-  rankPfDiff   Int
-  ptsDiff      Float    // Points diff (home vs road)
-  rankPtsDiff  Int
-  nstDiff      Float    // Non-steal turnovers diff
-  rankNstDiff  Int
-  blkDiff      Float    // Blocks diff
-  rankBlkDiff  Int
-  elevation    Float    // Arena elevation in feet
-  rankElev     Int
-  createdAt    DateTime @default(now())
+  id          Int      @id @default(autoincrement())
+  season      Int
+  teamName    String
+  confShort   String
+  hca         Float // Home court advantage in points
+  rankHca     Int
+  pfDiff      Float // Personal fouls diff (home vs road)
+  rankPfDiff  Int
+  ptsDiff     Float // Points diff (home vs road)
+  rankPtsDiff Int
+  nstDiff     Float // Non-steal turnovers diff
+  rankNstDiff Int
+  blkDiff     Float // Blocks diff
+  rankBlkDiff Int
+  elevation   Float // Arena elevation in feet
+  rankElev    Int
+  createdAt   DateTime @default(now())
 
   @@unique([season, teamName])
   @@index([season])
@@ -820,13 +827,13 @@ model KenpomHCA {
 // ─── KENPOM OFFICIALS ────────────────────────────────────────────────────
 
 model KenpomOfficial {
-  id           Int      @id @default(autoincrement())
-  season       Int
-  name         String
-  faa          Float    // Fouls above average
-  rating       Float
-  games        Int
-  createdAt    DateTime @default(now())
+  id        Int      @id @default(autoincrement())
+  season    Int
+  name      String
+  faa       Float // Fouls above average
+  rating    Float
+  games     Int
+  createdAt DateTime @default(now())
 
   @@unique([season, name])
   @@index([season])
@@ -835,17 +842,17 @@ model KenpomOfficial {
 // ─── KENPOM JUMP BALL ────────────────────────────────────────────────────
 
 model KenpomJumpBall {
-  id              Int      @id @default(autoincrement())
-  season          Int
-  playerName      String
-  teamName        String
-  height          String   // e.g. "6-11"
-  rating          Float
-  alltimeWins     Int
-  alltimeLosses   Int
-  seasonWins      Int
-  seasonLosses    Int
-  createdAt       DateTime @default(now())
+  id            Int      @id @default(autoincrement())
+  season        Int
+  playerName    String
+  teamName      String
+  height        String // e.g. "6-11"
+  rating        Float
+  alltimeWins   Int
+  alltimeLosses Int
+  seasonWins    Int
+  seasonLosses  Int
+  createdAt     DateTime @default(now())
 
   @@unique([season, playerName, teamName])
   @@index([season])
@@ -857,9 +864,161 @@ model KenpomJumpBall {
 model TeamNameMapping {
   id         Int      @id @default(autoincrement())
   kenpomName String   @unique // KenPom team name (e.g. "St. Bonaventure")
-  espnName   String   // ESPN/DB team name (e.g. "Saint Bonaventure")
-  teamId     Int?     // FK to Team table
+  espnName   String // ESPN/DB team name (e.g. "Saint Bonaventure")
+  teamId     Int? // FK to Team table
   team       Team?    @relation(fields: [teamId], references: [id])
   confidence String   @default("manual") // 'exact', 'fuzzy', 'manual'
   createdAt  DateTime @default(now())
+}
+
+// ─── BARTTORVIK T-RANK SNAPSHOTS ──────────────────────────────────────────
+
+model BarttovikSnapshot {
+  id          Int      @id @default(autoincrement())
+  teamId      Int
+  team        Team     @relation(fields: [teamId], references: [id])
+  date        DateTime @db.Date
+  season      Int
+  tRank       Int?
+  tRankRating Float?
+  adjOE       Float?
+  adjDE       Float?
+  barthag     Float?
+  adjTempo    Float?
+  luck        Float?
+  sos         Float?
+  wins        Int?
+  losses      Int?
+
+  @@unique([teamId, date])
+  @@index([date])
+  @@index([teamId])
+}
+
+// ─── ELO RATINGS (ALL SPORTS) ─────────────────────────────────────────────
+
+model EloRating {
+  id     Int      @id @default(autoincrement())
+  teamId Int
+  team   Team     @relation(fields: [teamId], references: [id])
+  sport  Sport
+  date   DateTime @db.Date
+  elo    Float    @default(1500)
+
+  @@unique([teamId, sport, date])
+  @@index([sport, date])
+  @@index([teamId, sport])
+}
+
+// ─── GAME WEATHER (NFL/NCAAF OUTDOOR) ─────────────────────────────────────
+
+model GameWeather {
+  id              Int      @id @default(autoincrement())
+  sport           Sport
+  gameDate        DateTime @db.Date
+  homeTeam        String
+  awayTeam        String
+  temperatureF    Float?
+  windSpeedMph    Float?
+  windGustMph     Float?
+  precipitationIn Float?
+  humidityPct     Int?
+  conditions      String?
+  isDome          Boolean  @default(false)
+  fetchedAt       DateTime @default(now())
+
+  @@unique([sport, gameDate, homeTeam, awayTeam])
+  @@index([sport, gameDate])
+}
+
+// ─── NBA TEAM STATS (FOUR FACTORS) ────────────────────────────────────────
+
+model NBATeamStats {
+  id        Int      @id @default(autoincrement())
+  teamId    Int
+  team      Team     @relation(fields: [teamId], references: [id])
+  date      DateTime @db.Date
+  netRating Float?
+  offRating Float?
+  defRating Float?
+  pace      Float?
+  efgPct    Float?
+  tovPct    Float?
+  orbPct    Float?
+  ftRate    Float?
+  oppEfgPct Float?
+  oppTovPct Float?
+  oppOrbPct Float?
+  oppFtRate Float?
+  wins      Int?
+  losses    Int?
+
+  @@unique([teamId, date])
+  @@index([date])
+  @@index([teamId])
+}
+
+// ─── NCAAF ADVANCED STATS (CFBD) ──────────────────────────────────────────
+
+model NCAAFAdvancedStats {
+  id              Int    @id @default(autoincrement())
+  teamId          Int
+  team            Team   @relation(fields: [teamId], references: [id])
+  season          Int
+  spOverall       Float?
+  spOffense       Float?
+  spDefense       Float?
+  elo             Float?
+  srs             Float?
+  talentComposite Float?
+  ppaOverall      Float?
+  ppaPass         Float?
+  ppaRush         Float?
+  ppaDef          Float?
+
+  @@unique([teamId, season])
+  @@index([teamId])
+}
+
+// ─── NFL TEAM EPA (NFLVERSE) ──────────────────────────────────────────────
+
+model NFLTeamEPA {
+  id                Int    @id @default(autoincrement())
+  teamId            Int
+  team              Team   @relation(fields: [teamId], references: [id])
+  season            Int
+  week              Int
+  offEpaPerPlay     Float?
+  defEpaPerPlay     Float?
+  passEpa           Float?
+  rushEpa           Float?
+  successRate       Float?
+  cpoe              Float?
+  redZoneTdPct      Float?
+  thirdDownPct      Float?
+  explosivePlayRate Float?
+  turnoverMargin    Int?
+
+  @@unique([teamId, season, week])
+  @@index([teamId, season])
+}
+
+// ─── VENUE (STADIUM/ARENA DATA) ───────────────────────────────────────────
+
+model Venue {
+  id         Int     @id @default(autoincrement())
+  name       String
+  city       String
+  state      String?
+  sport      Sport
+  teamName   String
+  latitude   Float
+  longitude  Float
+  altitudeFt Int     @default(0)
+  isDome     Boolean @default(false)
+  surface    String?
+  capacity   Int?
+
+  @@unique([sport, teamName])
+  @@index([sport])
 }

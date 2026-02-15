@@ -383,6 +383,137 @@ export async function POST(request: NextRequest) {
       results.sp_enrich_NCAAF = { error: "Unknown error" };
     }
 
+    // 2.8. Sync new data sources (Elo, Barttorvik, NFL EPA, NBA stats, CFBD, Weather)
+    // These populate the 7 new tables that feed pick engine v10 signals.
+    // Each is independent and can fail gracefully without blocking other steps.
+
+    // 2.8a. Recalculate Elo ratings for all sports
+    for (const sport of SPORTS) {
+      try {
+        const eloResult = await Sentry.startSpan(
+          { name: `cron.elo.${sport}`, op: "cron.step" },
+          async () => {
+            const { recalculateElo } = await import("@/lib/elo");
+            await recalculateElo(sport);
+            return { success: true };
+          }
+        );
+        results[`elo_${sport}`] = eloResult;
+      } catch (err) {
+        Sentry.captureException(err, {
+          tags: { cronStep: "elo", sport },
+        });
+        console.error(`[Cron] Elo recalc failed for ${sport}:`, err);
+        results[`elo_${sport}`] = { error: "Unknown error" };
+      }
+    }
+
+    // 2.8b. Sync Barttorvik T-Rank snapshots (NCAAMB only)
+    try {
+      const bartResult = await Sentry.startSpan(
+        { name: "cron.barttorvik.NCAAMB", op: "cron.step" },
+        async () => {
+          const { syncBarttovikRatings } = await import("@/lib/barttorvik");
+          return syncBarttovikRatings();
+        }
+      );
+      results.barttorvik_NCAAMB = bartResult;
+      console.log(
+        `[Cron] Barttorvik: synced=${bartResult.synced}, errors=${bartResult.errors}`
+      );
+    } catch (err) {
+      Sentry.captureException(err, {
+        tags: { cronStep: "barttorvik", sport: "NCAAMB" },
+      });
+      console.error("[Cron] Barttorvik sync failed:", err);
+      results.barttorvik_NCAAMB = { error: "Unknown error" };
+    }
+
+    // 2.8c. Sync NFL team EPA from nflverse (NFL only, weekly data)
+    try {
+      const nflEpaResult = await Sentry.startSpan(
+        { name: "cron.nfl_epa.NFL", op: "cron.step" },
+        async () => {
+          const { syncNFLTeamEPA } = await import("@/lib/nflverse");
+          return syncNFLTeamEPA();
+        }
+      );
+      results.nfl_epa = nflEpaResult;
+      console.log(
+        `[Cron] NFL EPA: synced=${nflEpaResult.synced}, errors=${nflEpaResult.errors}`
+      );
+    } catch (err) {
+      Sentry.captureException(err, {
+        tags: { cronStep: "nfl_epa", sport: "NFL" },
+      });
+      console.error("[Cron] NFL EPA sync failed:", err);
+      results.nfl_epa = { error: "Unknown error" };
+    }
+
+    // 2.8d. Sync NBA Four Factors stats
+    try {
+      const nbaResult = await Sentry.startSpan(
+        { name: "cron.nba_stats.NBA", op: "cron.step" },
+        async () => {
+          const { syncNBATeamStats } = await import("@/lib/nba-stats");
+          return syncNBATeamStats();
+        }
+      );
+      results.nba_stats = nbaResult;
+      console.log(
+        `[Cron] NBA stats: synced=${nbaResult.synced}, errors=${nbaResult.errors}`
+      );
+    } catch (err) {
+      Sentry.captureException(err, {
+        tags: { cronStep: "nba_stats", sport: "NBA" },
+      });
+      console.error("[Cron] NBA stats sync failed:", err);
+      results.nba_stats = { error: "Unknown error" };
+    }
+
+    // 2.8e. Sync CFBD advanced stats (NCAAF — SP+, Elo, talent, PPA, SRS)
+    try {
+      const cfbdResult = await Sentry.startSpan(
+        { name: "cron.cfbd_advanced.NCAAF", op: "cron.step" },
+        async () => {
+          const { syncCFBDAdvancedStats } = await import("@/lib/cfbd");
+          return syncCFBDAdvancedStats();
+        }
+      );
+      results.cfbd_advanced = cfbdResult;
+      console.log(
+        `[Cron] CFBD advanced: synced=${cfbdResult.synced}, errors=${cfbdResult.errors}`
+      );
+    } catch (err) {
+      Sentry.captureException(err, {
+        tags: { cronStep: "cfbd_advanced", sport: "NCAAF" },
+      });
+      console.error("[Cron] CFBD advanced sync failed:", err);
+      results.cfbd_advanced = { error: "Unknown error" };
+    }
+
+    // 2.8f. Fetch weather for upcoming outdoor games (NFL/NCAAF)
+    try {
+      const weatherResult = await Sentry.startSpan(
+        { name: "cron.weather", op: "cron.step" },
+        async () => {
+          const { fetchWeatherForUpcomingGames } =
+            await import("@/lib/weather");
+          return fetchWeatherForUpcomingGames();
+        }
+      );
+      results.weather = weatherResult;
+      console.log(
+        `[Cron] Weather: fetched=${weatherResult.fetched}, skipped=${weatherResult.skipped}, errors=${weatherResult.errors}`
+      );
+    } catch (err) {
+      Sentry.captureException(err, {
+        tags: { cronStep: "weather" },
+      });
+      console.error("[Cron] Weather fetch failed:", err);
+      results.weather = { error: "Unknown error" };
+    }
+
     // 3. Pre-generate today's daily picks for all sports
     // Done here (after odds refresh) so picks are ready before users check
     // Afternoon/evening runs (UTC 17+) use force mode to regenerate with fresh odds
@@ -589,7 +720,19 @@ export async function POST(request: NextRequest) {
     clearGameCache();
     clearAnglesCache();
     clearKenpomCache();
-    console.log("[Cron] Game, angles, and KenPom caches cleared after sync");
+    try {
+      const { clearCFBDCache } = await import("@/lib/cfbd");
+      clearCFBDCache();
+      const { clearBarttovikCache } = await import("@/lib/barttorvik");
+      clearBarttovikCache();
+      const { clearWeatherCache } = await import("@/lib/weather");
+      clearWeatherCache();
+      const { clearNBACache } = await import("@/lib/nba-stats");
+      clearNBACache();
+    } catch {
+      // Non-critical — caches will expire naturally
+    }
+    console.log("[Cron] All caches cleared after sync");
 
     // 8. Track custom metrics for Sentry dashboards
     for (const sport of SPORTS) {
