@@ -9,10 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { publicLimiter, applyRateLimit } from "@/lib/rate-limit";
 import { prisma } from "@/lib/db";
-import {
-  getMatchupContext,
-  type GameContext,
-} from "@/lib/game-context-engine";
+import { getMatchupContext, type GameContext } from "@/lib/game-context-engine";
 import {
   loadGamesBySportCached,
   executeTrendQuery,
@@ -20,70 +17,12 @@ import {
   type TrendGame,
 } from "@/lib/trend-engine";
 import { analyzeTrendSignificance } from "@/lib/trend-stats";
+import { resolveTeamName } from "@/lib/team-resolver";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 const VALID_SPORTS = ["NFL", "NCAAF", "NCAAMB", "NBA"];
-
-// ─── Team Name Canonicalization ────────────────────────────────────────────
-// The URL may carry an ESPN display name (e.g., "NC State") from the
-// UpcomingGame table, but the Game tables reference Team.name (e.g.,
-// "N.C. State"). This map resolves common mismatches so stats still load.
-const NAME_ALIASES: Record<string, string> = {
-  "NC State": "N.C. State",
-  "Chicago State": "Chicago St.",
-  "Jackson State": "Jackson St.",
-  "Indiana State": "Indiana St.",
-  "Arkansas-Pine Bluff": "Arkansas Pine Bluff",
-  "Texas A&M-Corpus Christi": "Texas A&M Corpus Chris",
-  "Appalachian State": "Appalachian St.",
-  "Bethune-Cookman": "Bethune Cookman",
-  "Louisiana-Monroe": "Louisiana Monroe",
-  "Ole Miss": "Mississippi",
-  "UConn": "Connecticut",
-  "Hawai'i": "Hawaii",
-  // Add more as discovered — these come from "Unresolved team" logs
-};
-
-/**
- * Resolve a team name (which may be an ESPN display name or canonical) to
- * the canonical Team.name stored in the DB. Returns the original name if
- * no better match is found.
- */
-async function resolveCanonicalName(
-  name: string,
-  sport: string,
-): Promise<string> {
-  // Fast path: exact match in Team table
-  const exact = await prisma.team.findFirst({
-    where: { sport: sport as "NFL" | "NCAAF" | "NCAAMB", name },
-    select: { name: true },
-  });
-  if (exact) return exact.name;
-
-  // Check static alias map
-  if (NAME_ALIASES[name]) {
-    return NAME_ALIASES[name];
-  }
-
-  // Try common transformations
-  const variants = [
-    name.replace(/ State$/, " St."),
-    name.replace(/-/g, " "),
-    name.replace(/ State$/, " St.").replace(/-/g, " "),
-  ];
-  for (const v of variants) {
-    const match = await prisma.team.findFirst({
-      where: { sport: sport as "NFL" | "NCAAF" | "NCAAMB", name: v },
-      select: { name: true },
-    });
-    if (match) return match.name;
-  }
-
-  // Fallback: return original (will just get empty stats)
-  return name;
-}
 
 interface TeamRecentGame {
   gameDate: string;
@@ -123,21 +62,22 @@ export async function GET(request: NextRequest) {
     // 0. Resolve team names + load upcoming game + load sport games in parallel.
     // These are all independent DB operations — run concurrently.
     const sportEnum = sport as "NFL" | "NCAAF" | "NCAAMB";
-    const [canonHome, canonAway, upcomingByOriginal, sportGames] = await Promise.all([
-      resolveCanonicalName(homeTeam, sport),
-      resolveCanonicalName(awayTeam, sport),
-      prisma.upcomingGame.findFirst({
-        where: {
-          sport: sportEnum,
-          homeTeam,
-          awayTeam,
-          gameDate: { gte: new Date() },
-        },
-        orderBy: { gameDate: "asc" },
-      }),
-      // Load only this sport's games (not all 150K across 3 sports)
-      loadGamesBySportCached(sportEnum),
-    ]);
+    const [canonHome, canonAway, upcomingByOriginal, sportGames] =
+      await Promise.all([
+        resolveTeamName(homeTeam, sport, "espn"),
+        resolveTeamName(awayTeam, sport, "espn"),
+        prisma.upcomingGame.findFirst({
+          where: {
+            sport: sportEnum,
+            homeTeam,
+            awayTeam,
+            gameDate: { gte: new Date() },
+          },
+          orderBy: { gameDate: "asc" },
+        }),
+        // Load only this sport's games (not all 150K across 3 sports)
+        loadGamesBySportCached(sportEnum),
+      ]);
 
     // If upcoming game not found with original names, try canonical names
     let upcomingGame = upcomingByOriginal;
@@ -174,7 +114,7 @@ export async function GET(request: NextRequest) {
         sport as "NFL" | "NCAAF" | "NCAAMB",
         canonHome,
         canonAway,
-        currentSeason,
+        currentSeason
       );
     } catch {
       // May fail if no historical matchup exists - that's OK
@@ -185,8 +125,16 @@ export async function GET(request: NextRequest) {
     const awayRecent = getRecentGames(sportGames, canonAway, 10);
 
     // 6. Build team season stats
-    const homeSeasonStats = buildSeasonStats(sportGames, canonHome, currentSeason);
-    const awaySeasonStats = buildSeasonStats(sportGames, canonAway, currentSeason);
+    const homeSeasonStats = buildSeasonStats(
+      sportGames,
+      canonHome,
+      currentSeason
+    );
+    const awaySeasonStats = buildSeasonStats(
+      sportGames,
+      canonAway,
+      currentSeason
+    );
 
     // 7. Build additional trend queries
     const additionalTrends = await buildAdditionalTrends(
@@ -194,7 +142,7 @@ export async function GET(request: NextRequest) {
       canonHome,
       canonAway,
       currentSeason,
-      sportGames,
+      sportGames
     );
 
     const durationMs = Math.round(performance.now() - start);
@@ -238,7 +186,7 @@ export async function GET(request: NextRequest) {
     // Cache at CDN for 5 min, serve stale for 10 min while revalidating
     response.headers.set(
       "Cache-Control",
-      "public, s-maxage=300, stale-while-revalidate=600",
+      "public, s-maxage=300, stale-while-revalidate=600"
     );
     return response;
   } catch (err) {
@@ -250,7 +198,7 @@ export async function GET(request: NextRequest) {
 function getRecentGames(
   allGames: TrendGame[],
   team: string,
-  limit: number,
+  limit: number
 ): TeamRecentGame[] {
   const teamGames = allGames
     .filter((g) => g.homeTeam === team || g.awayTeam === team)
@@ -270,7 +218,7 @@ function getRecentGames(
       score: isHome
         ? `${g.homeScore ?? 0}-${g.awayScore ?? 0}`
         : `${g.awayScore ?? 0}-${g.homeScore ?? 0}`,
-      result: tied ? "T" as const : won ? "W" as const : "L" as const,
+      result: tied ? ("T" as const) : won ? ("W" as const) : ("L" as const),
       spread: g.spread,
       spreadResult: isHome
         ? g.spreadResult
@@ -308,17 +256,24 @@ interface SeasonStats {
 function buildSeasonStats(
   allGames: TrendGame[],
   team: string,
-  season: number,
+  season: number
 ): SeasonStats {
   const teamGames = allGames.filter(
-    (g) => g.season === season && (g.homeTeam === team || g.awayTeam === team),
+    (g) => g.season === season && (g.homeTeam === team || g.awayTeam === team)
   );
 
-  let wins = 0, losses = 0;
-  let atsCov = 0, atsLost = 0;
-  let overs = 0, unders = 0;
-  let homeW = 0, homeL = 0, awayW = 0, awayL = 0;
-  let totalPF = 0, totalPA = 0;
+  let wins = 0,
+    losses = 0;
+  let atsCov = 0,
+    atsLost = 0;
+  let overs = 0,
+    unders = 0;
+  let homeW = 0,
+    homeL = 0,
+    awayW = 0,
+    awayL = 0;
+  let totalPF = 0,
+    totalPA = 0;
 
   for (const g of teamGames) {
     const isHome = g.homeTeam === team;
@@ -361,7 +316,8 @@ function buildSeasonStats(
     record: `${wins}-${losses}`,
     wins,
     losses,
-    winPct: wins + losses > 0 ? Math.round((wins / (wins + losses)) * 1000) / 10 : 0,
+    winPct:
+      wins + losses > 0 ? Math.round((wins / (wins + losses)) * 1000) / 10 : 0,
     atsRecord: `${atsCov}-${atsLost}`,
     atsCovered: atsCov,
     atsLost,
@@ -393,7 +349,7 @@ async function buildAdditionalTrends(
   homeTeam: string,
   awayTeam: string,
   currentSeason: number,
-  allGames: TrendGame[],
+  allGames: TrendGame[]
 ): Promise<AdditionalTrend[]> {
   const trends: AdditionalTrend[] = [];
 
@@ -402,13 +358,17 @@ async function buildAdditionalTrends(
     label: string,
     description: string,
     query: TrendQuery,
-    favorsSide: "home" | "away",
+    favorsSide: "home" | "away"
   ) {
     try {
       const result = executeTrendQuery(query, allGames);
       const atsTotal = result.summary.atsCovered + result.summary.atsLost;
       if (atsTotal >= 5) {
-        const sig = analyzeTrendSignificance(result.summary.atsCovered, atsTotal, 0.5);
+        const sig = analyzeTrendSignificance(
+          result.summary.atsCovered,
+          atsTotal,
+          0.5
+        );
         trends.push({
           label,
           description,
@@ -416,7 +376,12 @@ async function buildAdditionalTrends(
           rate: result.summary.atsPct,
           sampleSize: atsTotal,
           strength: sig.strength,
-          favors: sig.observedRate > 0.5 ? favorsSide : (favorsSide === "home" ? "away" : "home"),
+          favors:
+            sig.observedRate > 0.5
+              ? favorsSide
+              : favorsSide === "home"
+                ? "away"
+                : "home",
         });
       }
     } catch {
@@ -435,7 +400,7 @@ async function buildAdditionalTrends(
       seasonRange: [currentSeason - 2, currentSeason],
       filters: [{ field: "spread", operator: "lt", value: 0 }],
     } as TrendQuery,
-    "home",
+    "home"
   );
 
   // Away team as underdog (last 3 seasons)
@@ -449,7 +414,7 @@ async function buildAdditionalTrends(
       seasonRange: [currentSeason - 2, currentSeason],
       filters: [{ field: "spread", operator: "gt", value: 0 }],
     } as TrendQuery,
-    "away",
+    "away"
   );
 
   // Home team at home (last 3 seasons)
@@ -463,7 +428,7 @@ async function buildAdditionalTrends(
       seasonRange: [currentSeason - 2, currentSeason],
       filters: [{ field: "isHome", operator: "eq", value: true }],
     } as TrendQuery,
-    "home",
+    "home"
   );
 
   // Away team on the road (last 3 seasons)
@@ -477,12 +442,20 @@ async function buildAdditionalTrends(
       seasonRange: [currentSeason - 2, currentSeason],
       filters: [{ field: "isHome", operator: "eq", value: false }],
     } as TrendQuery,
-    "away",
+    "away"
   );
 
   // Sort by strength
-  const strengthOrder: Record<string, number> = { strong: 0, moderate: 1, weak: 2, noise: 3 };
-  trends.sort((a, b) => (strengthOrder[a.strength] ?? 3) - (strengthOrder[b.strength] ?? 3));
+  const strengthOrder: Record<string, number> = {
+    strong: 0,
+    moderate: 1,
+    weak: 2,
+    noise: 3,
+  };
+  trends.sort(
+    (a, b) =>
+      (strengthOrder[a.strength] ?? 3) - (strengthOrder[b.strength] ?? 3)
+  );
 
   return trends;
 }

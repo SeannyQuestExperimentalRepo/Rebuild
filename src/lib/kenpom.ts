@@ -348,6 +348,55 @@ export function lookupRating(
   return ratings.get(teamName);
 }
 
+// ─── Map-Returning Fetchers (re-keyed by canonical team name) ──────────────
+
+/**
+ * Fetch point distribution data as a Map keyed by canonical DB team name.
+ * Follows the same re-keying pattern as getKenpomRatings().
+ */
+export async function getKenpomPointDistMap(
+  season?: number
+): Promise<Map<string, KenpomPointDist>> {
+  const raw = await getKenpomPointDist(season);
+  const { resolveTeamName } = await import("./team-resolver");
+  const map = new Map<string, KenpomPointDist>();
+  for (const entry of raw) {
+    const canonical = await resolveTeamName(entry.TeamName, "NCAAMB", "kenpom");
+    map.set(canonical, entry);
+  }
+  return map;
+}
+
+/**
+ * Fetch height/experience data as a Map keyed by canonical DB team name.
+ */
+export async function getKenpomHeightMap(
+  season?: number
+): Promise<Map<string, KenpomHeight>> {
+  const raw = await getKenpomHeight(season);
+  const { resolveTeamName } = await import("./team-resolver");
+  const map = new Map<string, KenpomHeight>();
+  for (const entry of raw) {
+    const canonical = await resolveTeamName(entry.TeamName, "NCAAMB", "kenpom");
+    map.set(canonical, entry);
+  }
+  return map;
+}
+
+export function lookupPointDist(
+  map: Map<string, KenpomPointDist>,
+  teamName: string
+): KenpomPointDist | undefined {
+  return map.get(teamName);
+}
+
+export function lookupHeight(
+  map: Map<string, KenpomHeight>,
+  teamName: string
+): KenpomHeight | undefined {
+  return map.get(teamName);
+}
+
 // ─── Season Helper ──────────────────────────────────────────────────────────
 
 function getCurrentKenpomSeason(): number {

@@ -68,9 +68,15 @@ import { executePlayerPropQueryFromDB } from "./prop-trend-engine";
 import {
   getKenpomRatings,
   getKenpomFanMatch,
+  getKenpomPointDistMap,
+  getKenpomHeightMap,
   lookupRating,
+  lookupPointDist,
+  lookupHeight,
   type KenpomRating,
   type KenpomFanMatch,
+  type KenpomPointDist,
+  type KenpomHeight,
 } from "./kenpom";
 import { getCFBDRatings, lookupCFBDRating, type CFBDRating } from "./cfbd";
 import { signalEloEdge } from "./elo";
@@ -122,16 +128,17 @@ interface SignalResult {
 
 const SPREAD_WEIGHTS: Record<string, Record<string, number>> = {
   NCAAMB: {
-    modelEdge: 0.25, // v10: reduced from 0.30 for eloEdge + barttorvik
-    seasonATS: 0.15,
-    trendAngles: 0.2, // v10: reduced from 0.25
+    modelEdge: 0.23, // v10→v11: reduced for sizeExp
+    seasonATS: 0.14, // v10→v11: reduced for sizeExp
+    trendAngles: 0.2,
     recentForm: 0.1,
     h2h: 0.05,
     situational: 0.0,
     restDays: 0.05,
-    marketEdge: 0.1,
-    eloEdge: 0.05, // v10: Elo rating edge
-    barttorvik: 0.05, // v10: T-Rank ensemble signal
+    marketEdge: 0.08, // v10→v11: reduced for sizeExp
+    eloEdge: 0.05,
+    barttorvik: 0.05,
+    sizeExp: 0.05, // v11: KenPom experience + continuity signal
   },
   NFL: {
     modelEdge: 0.15, // v10: reduced from 0.20 for eloEdge + nflEpa
@@ -167,13 +174,14 @@ const SPREAD_WEIGHTS: Record<string, Record<string, number>> = {
 
 const OU_WEIGHTS: Record<string, Record<string, number>> = {
   NCAAMB: {
-    modelEdge: 0.3, // v10: reduced from 0.35 for barttorvik
-    seasonOU: 0.12,
+    modelEdge: 0.28, // v10→v11: reduced for pointDist
+    seasonOU: 0.1, // v10→v11: reduced for pointDist
     trendAngles: 0.18,
-    recentForm: 0.08,
+    recentForm: 0.07, // v10→v11: reduced for pointDist
     h2hWeather: 0.12,
     tempoDiff: 0.15,
-    barttorvik: 0.05, // v10: T-Rank O/U ensemble signal
+    barttorvik: 0.05,
+    pointDist: 0.05, // v11: KenPom 3P exploitation matchup signal
   },
   NFL: {
     modelEdge: 0.1, // v10: reduced from 0.20 for nflEpa + weather
@@ -1721,6 +1729,133 @@ function signalH2HWeatherOU(
   };
 }
 
+// ─── Signal: Point Distribution Matchup (O/U) ──────────────────────────────
+
+/**
+ * 3P exploitation matchup signal for O/U.
+ * When both teams are in a high-3P environment (one shoots lots of 3s,
+ * opponent allows lots of 3s), games tend to go over. Low-3P / FT-heavy
+ * matchups lean under.
+ */
+function signalPointDistMatchup(
+  pointDistMap: Map<string, KenpomPointDist> | null,
+  homeTeam: string,
+  awayTeam: string
+): SignalResult {
+  const neutral: SignalResult = {
+    category: "pointDist",
+    direction: "neutral",
+    magnitude: 0,
+    confidence: 0,
+    label: "N/A",
+    strength: "noise",
+  };
+  if (!pointDistMap) return neutral;
+
+  const homeD = lookupPointDist(pointDistMap, homeTeam);
+  const awayD = lookupPointDist(pointDistMap, awayTeam);
+  if (!homeD || !awayD) return neutral;
+
+  // 3P exploitation: how much each team's 3P offense matches up against
+  // the opponent's 3P defense allowance
+  // homeOffFg3 = % of home's points from 3P, awayDefFg3 = % opponents score from 3P vs away
+  const matchup3P =
+    (homeD.OffFg3 + awayD.DefFg3 + awayD.OffFg3 + homeD.DefFg3) / 4;
+
+  // Thresholds based on typical KenPom distributions (~0.28-0.35 range)
+  const OVER_THRESHOLD = 0.36;
+  const UNDER_THRESHOLD = 0.26;
+  const NEUTRAL_CENTER = 0.31;
+
+  if (matchup3P >= OVER_THRESHOLD) {
+    const edge = matchup3P - NEUTRAL_CENTER;
+    const magnitude = clamp(edge * 80, 2, 8);
+    return {
+      category: "pointDist",
+      direction: "over",
+      magnitude: Math.round(magnitude * 10) / 10,
+      confidence: clamp(0.45 + edge * 5, 0.45, 0.75),
+      label: `High 3P matchup (${(matchup3P * 100).toFixed(1)}%)`,
+      strength: magnitude >= 5 ? "moderate" : "weak",
+    };
+  }
+
+  if (matchup3P <= UNDER_THRESHOLD) {
+    const edge = NEUTRAL_CENTER - matchup3P;
+    const magnitude = clamp(edge * 80, 2, 8);
+    return {
+      category: "pointDist",
+      direction: "under",
+      magnitude: Math.round(magnitude * 10) / 10,
+      confidence: clamp(0.45 + edge * 5, 0.45, 0.75),
+      label: `Low 3P matchup (${(matchup3P * 100).toFixed(1)}%)`,
+      strength: magnitude >= 5 ? "moderate" : "weak",
+    };
+  }
+
+  return neutral;
+}
+
+// ─── Signal: Size / Experience (Spread) ─────────────────────────────────────
+
+/**
+ * Experience + continuity composite signal for spreads.
+ * More experienced teams with higher roster continuity tend to perform
+ * more reliably ATS.
+ */
+function signalSizeExperience(
+  heightMap: Map<string, KenpomHeight> | null,
+  homeTeam: string,
+  awayTeam: string
+): SignalResult {
+  const neutral: SignalResult = {
+    category: "sizeExp",
+    direction: "neutral",
+    magnitude: 0,
+    confidence: 0,
+    label: "N/A",
+    strength: "noise",
+  };
+  if (!heightMap) return neutral;
+
+  const homeH = lookupHeight(heightMap, homeTeam);
+  const awayH = lookupHeight(heightMap, awayTeam);
+  if (!homeH || !awayH) return neutral;
+
+  // Maturity composite: experience (0-2+ scale) weighted more heavily,
+  // continuity (0-100%) adds cohesion factor
+  const homeMaturity = homeH.Exp * 0.6 + (homeH.Continuity / 100) * 0.4;
+  const awayMaturity = awayH.Exp * 0.6 + (awayH.Continuity / 100) * 0.4;
+  const maturityEdge = homeMaturity - awayMaturity;
+
+  const EDGE_THRESHOLD = 0.15;
+  if (Math.abs(maturityEdge) < EDGE_THRESHOLD) return neutral;
+
+  const direction: "home" | "away" = maturityEdge > 0 ? "home" : "away";
+  const absEdge = Math.abs(maturityEdge);
+
+  // Scale magnitude: 0.15 edge → ~3, 0.6+ edge → ~8
+  const magnitude = clamp(absEdge * 13, 2, 8);
+
+  // Height effectiveness boosts confidence (team that uses its size well)
+  const favoredHgt = direction === "home" ? homeH : awayH;
+  const hgtBoost = favoredHgt.HgtEff > 0 ? 0.05 : 0;
+  const confidence = clamp(0.4 + absEdge * 1.5 + hgtBoost, 0.4, 0.75);
+
+  const favoredTeam = direction === "home" ? homeTeam : awayTeam;
+  const expDiff = Math.abs(homeH.Exp - awayH.Exp).toFixed(1);
+  const contDiff = Math.abs(homeH.Continuity - awayH.Continuity).toFixed(0);
+
+  return {
+    category: "sizeExp",
+    direction,
+    magnitude: Math.round(magnitude * 10) / 10,
+    confidence: Math.round(confidence * 100) / 100,
+    label: `${favoredTeam} exp+${expDiff} cont+${contDiff}%`,
+    strength: magnitude >= 6 ? "strong" : magnitude >= 3 ? "moderate" : "weak",
+  };
+}
+
 // ─── Convergence Scoring ─────────────────────────────────────────────────────
 
 function computeConvergenceScore(
@@ -2235,6 +2370,8 @@ export async function generateDailyPicks(
   // Historical backtests use KenpomSnapshot instead (see kenpom-pit.ts).
   let kenpomRatings: Map<string, KenpomRating> | null = null;
   let kenpomFanMatch: KenpomFanMatch[] | null = null;
+  let kenpomPointDistMap: Map<string, KenpomPointDist> | null = null;
+  let kenpomHeightMap: Map<string, KenpomHeight> | null = null;
   if (sport === "NCAAMB") {
     try {
       kenpomRatings = await getKenpomRatings();
@@ -2254,6 +2391,18 @@ export async function generateDailyPicks(
     } catch (err) {
       console.error(
         "[pick-engine] FanMatch fetch failed, continuing without:",
+        err
+      );
+    }
+    // v11: Fetch supplemental KenPom data (point distribution + height/experience)
+    try {
+      [kenpomPointDistMap, kenpomHeightMap] = await Promise.all([
+        getKenpomPointDistMap(),
+        getKenpomHeightMap(),
+      ]);
+    } catch (err) {
+      console.error(
+        "[pick-engine] KenPom supplemental fetch failed, continuing without:",
         err
       );
     }
@@ -2442,6 +2591,15 @@ export async function generateDailyPicks(
             if (nbaFactorsResult?.spread)
               spreadSignals.push(nbaFactorsResult.spread);
             if (bartSpreadSignal) spreadSignals.push(bartSpreadSignal);
+            // v11: KenPom size/experience signal (NCAAMB only)
+            if (kenpomHeightMap)
+              spreadSignals.push(
+                signalSizeExperience(
+                  kenpomHeightMap,
+                  game.homeTeam,
+                  game.awayTeam
+                )
+              );
 
             // v5: skip convergence bonus + require min 3 active signals
             const result = computeConvergenceScore(
@@ -2511,6 +2669,15 @@ export async function generateDailyPicks(
               ouSignals.push(
                 signalTempoDiff(kenpomRatings, game.homeTeam, game.awayTeam)
               );
+              // v11: KenPom 3P exploitation matchup signal
+              if (kenpomPointDistMap)
+                ouSignals.push(
+                  signalPointDistMatchup(
+                    kenpomPointDistMap,
+                    game.homeTeam,
+                    game.awayTeam
+                  )
+                );
             }
 
             // v10: Add new data source O/U signals (graceful — null signals are skipped)
