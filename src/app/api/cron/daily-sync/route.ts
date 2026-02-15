@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
   if (!verifyCronSecret(request.headers.get("authorization"))) {
     return NextResponse.json(
       { success: false, error: "Unauthorized" },
-      { status: 401 },
+      { status: 401 }
     );
   }
 
@@ -47,15 +47,18 @@ export async function POST(request: NextRequest) {
   const results: Record<string, unknown> = {};
 
   // Sentry Cron Monitor: signal check-in at start
-  const checkInId = Sentry.captureCheckIn({
-    monitorSlug: "daily-sync",
-    status: "in_progress",
-  }, {
-    schedule: { type: "crontab", value: "0 11,17,21 * * *" },
-    checkinMargin: 5,
-    maxRuntime: 10,
-    timezone: "Etc/UTC",
-  });
+  const checkInId = Sentry.captureCheckIn(
+    {
+      monitorSlug: "daily-sync",
+      status: "in_progress",
+    },
+    {
+      schedule: { type: "crontab", value: "0 11,17,21 * * *" },
+      checkinMargin: 5,
+      maxRuntime: 10,
+      timezone: "Etc/UTC",
+    }
+  );
 
   try {
     // 1. FIRST: Refresh upcoming games with odds
@@ -65,7 +68,7 @@ export async function POST(request: NextRequest) {
       try {
         const refreshResult = await Sentry.startSpan(
           { name: `cron.refresh.${sport}`, op: "cron.step" },
-          () => refreshUpcomingGames(sport),
+          () => refreshUpcomingGames(sport)
         );
         results[`refresh_${sport}`] = refreshResult;
       } catch (err) {
@@ -83,16 +86,19 @@ export async function POST(request: NextRequest) {
       const supplementResult = await Sentry.startSpan(
         { name: "cron.supplement.NCAAMB", op: "cron.step" },
         async () => {
-          const { supplementUpcomingGamesFromOddsApi } = await import("@/lib/odds-api-sync");
+          const { supplementUpcomingGamesFromOddsApi } =
+            await import("@/lib/odds-api-sync");
           return supplementUpcomingGamesFromOddsApi("NCAAMB");
-        },
+        }
       );
       results.supplement_NCAAMB = supplementResult;
       console.log(
-        `[Cron] OddsAPI supplement: fetched=${supplementResult.fetched}, supplemented=${supplementResult.supplemented}, enriched=${supplementResult.enriched}`,
+        `[Cron] OddsAPI supplement: fetched=${supplementResult.fetched}, supplemented=${supplementResult.supplemented}, enriched=${supplementResult.enriched}`
       );
     } catch (err) {
-      Sentry.captureException(err, { tags: { cronStep: "supplement", sport: "NCAAMB" } });
+      Sentry.captureException(err, {
+        tags: { cronStep: "supplement", sport: "NCAAMB" },
+      });
       console.error("[Cron] OddsAPI supplement failed:", err);
       results.supplement_NCAAMB = { error: "Unknown error" };
     }
@@ -105,10 +111,15 @@ export async function POST(request: NextRequest) {
         async () => {
           const { getKenpomFanMatch } = await import("@/lib/kenpom");
           const { prisma } = await import("@/lib/db");
-          const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+          const todayStr = new Date().toLocaleDateString("en-CA", {
+            timeZone: "America/New_York",
+          });
           const fanMatch = await getKenpomFanMatch(todayStr);
           if (!fanMatch || fanMatch.length === 0) {
-            results.fanmatch_NCAAMB = { skipped: true, reason: "no FanMatch data" };
+            results.fanmatch_NCAAMB = {
+              skipped: true,
+              reason: "no FanMatch data",
+            };
             return;
           }
 
@@ -139,12 +150,19 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          results.fanmatch_NCAAMB = { captured: updated, available: fanMatch.length };
-          console.log(`[Cron] FanMatch: captured ${updated} predictions from ${fanMatch.length} games`);
-        },
+          results.fanmatch_NCAAMB = {
+            captured: updated,
+            available: fanMatch.length,
+          };
+          console.log(
+            `[Cron] FanMatch: captured ${updated} predictions from ${fanMatch.length} games`
+          );
+        }
       );
     } catch (err) {
-      Sentry.captureException(err, { tags: { cronStep: "fanmatch", sport: "NCAAMB" } });
+      Sentry.captureException(err, {
+        tags: { cronStep: "fanmatch", sport: "NCAAMB" },
+      });
       console.error("[Cron] FanMatch capture failed:", err);
       results.fanmatch_NCAAMB = { error: "Unknown error" };
     }
@@ -156,7 +174,7 @@ export async function POST(request: NextRequest) {
       try {
         const syncResult = await Sentry.startSpan(
           { name: `cron.sync.${sport}`, op: "cron.step" },
-          () => syncCompletedGames(sport),
+          () => syncCompletedGames(sport)
         );
         results[`sync_${sport}`] = syncResult;
       } catch (err) {
@@ -175,35 +193,40 @@ export async function POST(request: NextRequest) {
         async () => {
           const { backfillYesterdayOdds } = await import("@/lib/odds-api-sync");
           return backfillYesterdayOdds();
-        },
+        }
       );
       results.backfill_NCAAMB = backfillResult;
       console.log(
-        `[Cron] OddsAPI backfill: updated=${backfillResult.updated}, notMatched=${backfillResult.notMatched}`,
+        `[Cron] OddsAPI backfill: updated=${backfillResult.updated}, notMatched=${backfillResult.notMatched}`
       );
     } catch (err) {
-      Sentry.captureException(err, { tags: { cronStep: "backfill", sport: "NCAAMB" } });
+      Sentry.captureException(err, {
+        tags: { cronStep: "backfill", sport: "NCAAMB" },
+      });
       console.error("[Cron] OddsAPI backfill failed:", err);
       results.backfill_NCAAMB = { error: "Unknown error" };
     }
 
-    // 2.6. Enrich NCAAMB games with KenPom season ratings
-    // KenPom AdjEM/AdjOE/AdjDE/AdjTempo are not captured at game creation time.
-    // This step backfills any NCAAMBGame rows missing KenPom data.
+    // 2.6. Enrich NCAAMB games with KenPom PIT (point-in-time) ratings
+    // Uses KenpomSnapshot for the game date when available, falls back to live API.
+    // This ensures completed games get ratings from the time they were played.
     try {
       const enrichResult = await Sentry.startSpan(
         { name: "cron.kenpom_enrich.NCAAMB", op: "cron.step" },
         async () => {
-          const { enrichNCAAMBGamesWithKenpom } = await import("@/lib/espn-sync");
+          const { enrichNCAAMBGamesWithKenpom } =
+            await import("@/lib/espn-sync");
           return enrichNCAAMBGamesWithKenpom();
-        },
+        }
       );
       results.kenpom_enrich_NCAAMB = enrichResult;
       console.log(
-        `[Cron] KenPom enrich: enriched=${enrichResult.enriched}, notMatched=${enrichResult.notMatched}`,
+        `[Cron] KenPom enrich: enriched=${enrichResult.enriched}, notMatched=${enrichResult.notMatched}, pitUsed=${"pitUsed" in enrichResult ? enrichResult.pitUsed : "n/a"}, liveUsed=${"liveUsed" in enrichResult ? enrichResult.liveUsed : "n/a"}`
       );
     } catch (err) {
-      Sentry.captureException(err, { tags: { cronStep: "kenpom_enrich", sport: "NCAAMB" } });
+      Sentry.captureException(err, {
+        tags: { cronStep: "kenpom_enrich", sport: "NCAAMB" },
+      });
       console.error("[Cron] KenPom enrichment failed:", err);
       results.kenpom_enrich_NCAAMB = { error: "Unknown error" };
     }
@@ -216,15 +239,20 @@ export async function POST(request: NextRequest) {
         async () => {
           const { getKenpomArchiveRatings } = await import("@/lib/kenpom");
           const { prisma } = await import("@/lib/db");
-          const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+          const todayStr = new Date().toLocaleDateString("en-CA", {
+            timeZone: "America/New_York",
+          });
           const snapshotDate = new Date(todayStr + "T00:00:00Z");
 
           // Skip if we already captured today
-          const existing = await prisma.kenpomSnapshot.count({ where: { snapshotDate } });
+          const existing = await prisma.kenpomSnapshot.count({
+            where: { snapshotDate },
+          });
           if (existing > 0) return { skipped: true, existing };
 
           const ratings = await getKenpomArchiveRatings(todayStr);
-          if (!ratings || ratings.length === 0) return { skipped: true, reason: "no data" };
+          if (!ratings || ratings.length === 0)
+            return { skipped: true, reason: "no data" };
 
           const result = await prisma.kenpomSnapshot.createMany({
             data: ratings.map((r) => ({
@@ -241,12 +269,14 @@ export async function POST(request: NextRequest) {
             skipDuplicates: true,
           });
           return { captured: result.count };
-        },
+        }
       );
       results.kenpom_snapshot = snapshotResult;
       console.log(`[Cron] KenPom snapshot:`, snapshotResult);
     } catch (err) {
-      Sentry.captureException(err, { tags: { cronStep: "kenpom_snapshot", sport: "NCAAMB" } });
+      Sentry.captureException(err, {
+        tags: { cronStep: "kenpom_snapshot", sport: "NCAAMB" },
+      });
       console.error("[Cron] KenPom snapshot capture failed:", err);
       results.kenpom_snapshot = { error: "Unknown error" };
     }
@@ -256,12 +286,14 @@ export async function POST(request: NextRequest) {
       const suppResult = await Sentry.startSpan(
         { name: "cron.kenpom_supplemental.NCAAMB", op: "cron.step" },
         async () => {
-          const { getKenpomPointDist, getKenpomHeight } = await import("@/lib/kenpom");
+          const { getKenpomPointDist, getKenpomHeight } =
+            await import("@/lib/kenpom");
           const { prisma } = await import("@/lib/db");
 
-          const season = new Date().getMonth() >= 10
-            ? new Date().getFullYear() + 1
-            : new Date().getFullYear();
+          const season =
+            new Date().getMonth() >= 10
+              ? new Date().getFullYear() + 1
+              : new Date().getFullYear();
 
           // Delete + re-insert current season (data changes daily)
           await prisma.kenpomPointDist.deleteMany({ where: { season } });
@@ -317,12 +349,14 @@ export async function POST(request: NextRequest) {
           });
 
           return { pointDist: pdResult.count, height: htResult.count, season };
-        },
+        }
       );
       results.kenpom_supplemental = suppResult;
       console.log(`[Cron] KenPom supplemental:`, suppResult);
     } catch (err) {
-      Sentry.captureException(err, { tags: { cronStep: "kenpom_supplemental", sport: "NCAAMB" } });
+      Sentry.captureException(err, {
+        tags: { cronStep: "kenpom_supplemental", sport: "NCAAMB" },
+      });
       console.error("[Cron] KenPom supplemental refresh failed:", err);
       results.kenpom_supplemental = { error: "Unknown error" };
     }
@@ -335,14 +369,16 @@ export async function POST(request: NextRequest) {
         async () => {
           const { enrichNCAAFGamesWithSP } = await import("@/lib/espn-sync");
           return enrichNCAAFGamesWithSP();
-        },
+        }
       );
       results.sp_enrich_NCAAF = enrichResult;
       console.log(
-        `[Cron] SP+ enrich: enriched=${enrichResult.enriched}, notMatched=${enrichResult.notMatched}`,
+        `[Cron] SP+ enrich: enriched=${enrichResult.enriched}, notMatched=${enrichResult.notMatched}`
       );
     } catch (err) {
-      Sentry.captureException(err, { tags: { cronStep: "sp_enrich", sport: "NCAAF" } });
+      Sentry.captureException(err, {
+        tags: { cronStep: "sp_enrich", sport: "NCAAF" },
+      });
       console.error("[Cron] SP+ enrichment failed:", err);
       results.sp_enrich_NCAAF = { error: "Unknown error" };
     }
@@ -353,7 +389,9 @@ export async function POST(request: NextRequest) {
     {
       const { generateDailyPicks } = await import("@/lib/pick-engine");
       const { prisma } = await import("@/lib/db");
-      const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+      const todayStr = new Date().toLocaleDateString("en-CA", {
+        timeZone: "America/New_York",
+      });
       const todayKey = new Date(todayStr + "T00:00:00Z");
       const currentHourUTC = new Date().getUTCHours();
       const forceRegenerate = currentHourUTC >= 17; // Afternoon+ runs refresh picks
@@ -375,10 +413,15 @@ export async function POST(request: NextRequest) {
             const deleted = await prisma.dailyPick.deleteMany({
               where: { date: todayKey, sport, result: "PENDING" },
             });
-            console.log(`[Cron] Force-regenerating ${sport} picks (deleted ${deleted.count} pending picks)`);
+            console.log(
+              `[Cron] Force-regenerating ${sport} picks (deleted ${deleted.count} pending picks)`
+            );
           }
 
-          const { picks, context: pickContext } = await generateDailyPicks(todayStr, sport);
+          const { picks, context: pickContext } = await generateDailyPicks(
+            todayStr,
+            sport
+          );
 
           if (pickContext.gamesErrored > 0) {
             Sentry.addBreadcrumb({
@@ -407,7 +450,8 @@ export async function POST(request: NextRequest) {
                 trendScore: p.trendScore,
                 confidence: p.confidence,
                 headline: p.headline,
-                reasoning: p.reasoning as unknown as import("@prisma/client").Prisma.InputJsonValue,
+                reasoning:
+                  p.reasoning as unknown as import("@prisma/client").Prisma.InputJsonValue,
                 homeRank: p.homeRank,
                 awayRank: p.awayRank,
               })),
@@ -417,7 +461,9 @@ export async function POST(request: NextRequest) {
             // Detect duplicates (race condition from concurrent cron runs)
             if (createResult.count < picks.length) {
               const dupes = picks.length - createResult.count;
-              console.warn(`[Cron] ${sport}: ${dupes} duplicate picks skipped (concurrent cron?)`);
+              console.warn(
+                `[Cron] ${sport}: ${dupes} duplicate picks skipped (concurrent cron?)`
+              );
               Sentry.addBreadcrumb({
                 category: "cron",
                 message: `${sport}: ${dupes} duplicate picks detected`,
@@ -425,10 +471,15 @@ export async function POST(request: NextRequest) {
               });
             }
           }
-          results[`picks_${sport}`] = { generated: picks.length, context: pickContext };
+          results[`picks_${sport}`] = {
+            generated: picks.length,
+            context: pickContext,
+          };
           console.log(`[Cron] Generated ${picks.length} picks for ${sport}`);
         } catch (err) {
-          Sentry.captureException(err, { tags: { cronStep: "generate_picks", sport } });
+          Sentry.captureException(err, {
+            tags: { cronStep: "generate_picks", sport },
+          });
           console.error(`[Cron] Pick generation failed for ${sport}:`, err);
           results[`picks_${sport}`] = { error: "Unknown error" };
         }
@@ -442,10 +493,12 @@ export async function POST(request: NextRequest) {
         async () => {
           const { gradeYesterdaysPicks } = await import("@/lib/pick-engine");
           return gradeYesterdaysPicks();
-        },
+        }
       );
       results.grade_picks = gradeResult;
-      console.log(`[Cron] Graded ${gradeResult.graded} picks (${gradeResult.errors} errors)`);
+      console.log(
+        `[Cron] Graded ${gradeResult.graded} picks (${gradeResult.errors} errors)`
+      );
     } catch (err) {
       Sentry.captureException(err, { tags: { cronStep: "grade_picks" } });
       console.error("[Cron] Pick grading failed:", err);
@@ -459,10 +512,12 @@ export async function POST(request: NextRequest) {
         async () => {
           const { gradePendingBets } = await import("@/lib/pick-engine");
           return gradePendingBets();
-        },
+        }
       );
       results.grade_bets = betResult;
-      console.log(`[Cron] Graded ${betResult.graded} bets (${betResult.errors} errors)`);
+      console.log(
+        `[Cron] Graded ${betResult.graded} bets (${betResult.errors} errors)`
+      );
     } catch (err) {
       Sentry.captureException(err, { tags: { cronStep: "grade_bets" } });
       console.error("[Cron] Bet grading failed:", err);
@@ -476,35 +531,48 @@ export async function POST(request: NextRequest) {
         async () => {
           const { evaluateSavedTrends } = await import("@/lib/trend-evaluator");
           return evaluateSavedTrends();
-        },
+        }
       );
       results.trend_eval = {
         evaluated: trendResult.evaluated,
         triggered: trendResult.triggered,
         errors: trendResult.errors,
       };
-      console.log(`[Cron] Evaluated ${trendResult.evaluated} saved trends, ${trendResult.triggered} triggered`);
+      console.log(
+        `[Cron] Evaluated ${trendResult.evaluated} saved trends, ${trendResult.triggered} triggered`
+      );
 
       // 6.5. Send email notifications for triggered trends with notifyEmail enabled
       if (trendResult.triggeredTrends.length > 0) {
         try {
-          const { sendTrendAlertEmail, isEmailConfigured } = await import("@/lib/email");
+          const { sendTrendAlertEmail, isEmailConfigured } =
+            await import("@/lib/email");
           if (isEmailConfigured()) {
-            const toNotify = trendResult.triggeredTrends.filter((t) => t.notifyEmail);
+            const toNotify = trendResult.triggeredTrends.filter(
+              (t) => t.notifyEmail
+            );
             let emailsSent = 0;
             for (const trend of toNotify) {
               const sent = await sendTrendAlertEmail(
                 trend.userEmail,
                 trend.trendName,
                 trend.description,
-                trend.matchedGames,
+                trend.matchedGames
               );
               if (sent) emailsSent++;
             }
-            results.trend_emails = { eligible: toNotify.length, sent: emailsSent };
-            console.log(`[Cron] Sent ${emailsSent}/${toNotify.length} trend alert emails`);
+            results.trend_emails = {
+              eligible: toNotify.length,
+              sent: emailsSent,
+            };
+            console.log(
+              `[Cron] Sent ${emailsSent}/${toNotify.length} trend alert emails`
+            );
           } else {
-            results.trend_emails = { skipped: true, reason: "email not configured" };
+            results.trend_emails = {
+              skipped: true,
+              reason: "email not configured",
+            };
           }
         } catch (emailErr) {
           console.error("[Cron] Trend email notifications failed:", emailErr);
@@ -525,25 +593,38 @@ export async function POST(request: NextRequest) {
 
     // 8. Track custom metrics for Sentry dashboards
     for (const sport of SPORTS) {
-      const syncData = results[`sync_${sport}`] as { inserted?: number } | undefined;
+      const syncData = results[`sync_${sport}`] as
+        | { inserted?: number }
+        | undefined;
       if (syncData?.inserted != null) {
-        Sentry.metrics.gauge("cron.games_synced", syncData.inserted, { attributes: { sport } });
+        Sentry.metrics.gauge("cron.games_synced", syncData.inserted, {
+          attributes: { sport },
+        });
       }
-      const picksData = results[`picks_${sport}`] as { generated?: number } | undefined;
+      const picksData = results[`picks_${sport}`] as
+        | { generated?: number }
+        | undefined;
       if (picksData?.generated != null) {
-        Sentry.metrics.gauge("cron.picks_generated", picksData.generated, { attributes: { sport } });
+        Sentry.metrics.gauge("cron.picks_generated", picksData.generated, {
+          attributes: { sport },
+        });
       }
     }
 
     const durationMs = Math.round(performance.now() - start);
-    Sentry.metrics.gauge("cron.duration_ms", durationMs, { unit: "millisecond" });
+    Sentry.metrics.gauge("cron.duration_ms", durationMs, {
+      unit: "millisecond",
+    });
 
     // Compute health: check if critical steps errored or 0 picks generated
     const hasStepError = Object.values(results).some(
-      (r) => r && typeof r === "object" && "error" in (r as Record<string, unknown>),
+      (r) =>
+        r && typeof r === "object" && "error" in (r as Record<string, unknown>)
     );
     const totalPicks = SPORTS.reduce((sum, s) => {
-      const d = results[`picks_${s}`] as { generated?: number; skipped?: boolean } | undefined;
+      const d = results[`picks_${s}`] as
+        | { generated?: number; skipped?: boolean }
+        | undefined;
       if (d?.skipped) return sum; // skipped is fine (already exist)
       return sum + (d?.generated ?? 0);
     }, 0);
@@ -586,7 +667,7 @@ export async function POST(request: NextRequest) {
         success: false,
         error: "Internal server error",
       },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }

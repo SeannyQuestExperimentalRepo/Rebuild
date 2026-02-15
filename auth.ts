@@ -24,16 +24,25 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         if (!password) return null;
 
-        // Admin password grants full ADMIN access
+        // Admin password grants full ADMIN access — only for the canonical admin email
         const adminPassword = process.env.ADMIN_PASSWORD;
-        if (adminPassword && password.trim() === adminPassword.trim()) {
+        const ADMIN_EMAIL = "admin@trendline.app";
+        if (
+          adminPassword &&
+          email === ADMIN_EMAIL &&
+          password.trim() === adminPassword.trim()
+        ) {
           try {
             let adminUser = await prisma.user.findUnique({
               where: { email: "admin@trendline.app" },
             });
             if (!adminUser) {
               adminUser = await prisma.user.create({
-                data: { email: "admin@trendline.app", name: "Admin", role: "ADMIN" },
+                data: {
+                  email: "admin@trendline.app",
+                  name: "Admin",
+                  role: "ADMIN",
+                },
               });
             } else if (adminUser.role !== "ADMIN") {
               adminUser = await prisma.user.update({
@@ -80,7 +89,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
       // Refresh role from DB every 5 minutes to pick up role changes
       const now = Math.floor(Date.now() / 1000);
-      if (!token.roleRefreshedAt || now - (token.roleRefreshedAt as number) > 300) {
+      if (
+        !token.roleRefreshedAt ||
+        now - (token.roleRefreshedAt as number) > 300
+      ) {
         try {
           const dbUser = await prisma.user.findUnique({
             where: { id: token.id as string },

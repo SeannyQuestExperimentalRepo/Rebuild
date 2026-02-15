@@ -696,6 +696,162 @@ model KenpomHeight {
   @@index([teamName])
 }
 
+// ─── KENPOM FOUR FACTORS ──────────────────────────────────────────────────
+
+model KenpomFourFactors {
+  id             Int      @id @default(autoincrement())
+  season         Int
+  teamName       String
+  confShort      String
+  // Tempo
+  adjTempo       Float
+  rankAdjTempo   Int
+  // Offense
+  adjOE          Float
+  rankAdjOE      Int
+  offEfgPct      Float    // Effective FG%
+  rankOffEfgPct  Int
+  offToPct       Float    // Turnover %
+  rankOffToPct   Int
+  offOrPct       Float    // Offensive rebound %
+  rankOffOrPct   Int
+  offFtRate      Float    // Free throw rate (FTA/FGA)
+  rankOffFtRate  Int
+  // Defense
+  adjDE          Float
+  rankAdjDE      Int
+  defEfgPct      Float
+  rankDefEfgPct  Int
+  defToPct       Float    // Forced turnover %
+  rankDefToPct   Int
+  defOrPct       Float    // Defensive rebound % (opponent OR%)
+  rankDefOrPct   Int
+  defFtRate      Float
+  rankDefFtRate  Int
+  createdAt      DateTime @default(now())
+
+  @@unique([season, teamName])
+  @@index([season])
+  @@index([teamName])
+}
+
+// ─── KENPOM TEAM STATS ───────────────────────────────────────────────────
+
+model KenpomTeamStats {
+  id             Int      @id @default(autoincrement())
+  season         Int
+  teamName       String
+  confShort      String
+  // Offensive stats
+  off3pPct       Float    // 3-point %
+  rankOff3pPct   Int
+  off2pPct       Float    // 2-point %
+  rankOff2pPct   Int
+  offFtPct       Float    // Free throw %
+  rankOffFtPct   Int
+  offBlkPct      Float    // Block %
+  rankOffBlkPct  Int
+  offStlPct      Float    // Steal %
+  rankOffStlPct  Int
+  offNstPct      Float    // Non-steal turnover %
+  rankOffNstPct  Int
+  off2pDist      Float    // 2-point FGA distribution
+  rankOff2pDist  Int
+  offAstPct      Float    // Assist %
+  rankOffAstPct  Int
+  off3paPct      Float    // 3-point attempt % of FGA
+  rankOff3paPct  Int
+  offAdjOE       Float    // Adjusted offensive efficiency
+  rankOffAdjOE   Int
+  // Defensive stats
+  def3pPct       Float
+  rankDef3pPct   Int
+  def2pPct       Float
+  rankDef2pPct   Int
+  defFtPct       Float
+  rankDefFtPct   Int
+  defBlkPct      Float
+  rankDefBlkPct  Int
+  defStlPct      Float
+  rankDefStlPct  Int
+  defNstPct      Float
+  rankDefNstPct  Int
+  def2pDist      Float
+  rankDef2pDist  Int
+  defAstPct      Float
+  rankDefAstPct  Int
+  def3paPct      Float
+  rankDef3paPct  Int
+  defAdjDE       Float
+  rankDefAdjDE   Int
+  createdAt      DateTime @default(now())
+
+  @@unique([season, teamName])
+  @@index([season])
+  @@index([teamName])
+}
+
+// ─── KENPOM HOME COURT ADVANTAGE ─────────────────────────────────────────
+
+model KenpomHCA {
+  id           Int      @id @default(autoincrement())
+  season       Int
+  teamName     String
+  confShort    String
+  hca          Float    // Home court advantage in points
+  rankHca      Int
+  pfDiff       Float    // Personal fouls diff (home vs road)
+  rankPfDiff   Int
+  ptsDiff      Float    // Points diff (home vs road)
+  rankPtsDiff  Int
+  nstDiff      Float    // Non-steal turnovers diff
+  rankNstDiff  Int
+  blkDiff      Float    // Blocks diff
+  rankBlkDiff  Int
+  elevation    Float    // Arena elevation in feet
+  rankElev     Int
+  createdAt    DateTime @default(now())
+
+  @@unique([season, teamName])
+  @@index([season])
+  @@index([teamName])
+}
+
+// ─── KENPOM OFFICIALS ────────────────────────────────────────────────────
+
+model KenpomOfficial {
+  id           Int      @id @default(autoincrement())
+  season       Int
+  name         String
+  faa          Float    // Fouls above average
+  rating       Float
+  games        Int
+  createdAt    DateTime @default(now())
+
+  @@unique([season, name])
+  @@index([season])
+}
+
+// ─── KENPOM JUMP BALL ────────────────────────────────────────────────────
+
+model KenpomJumpBall {
+  id              Int      @id @default(autoincrement())
+  season          Int
+  playerName      String
+  teamName        String
+  height          String   // e.g. "6-11"
+  rating          Float
+  alltimeWins     Int
+  alltimeLosses   Int
+  seasonWins      Int
+  seasonLosses    Int
+  createdAt       DateTime @default(now())
+
+  @@unique([season, playerName, teamName])
+  @@index([season])
+  @@index([teamName])
+}
+
 // ─── TEAM NAME MAPPING ─────────────────────────────────────────────────────
 
 model TeamNameMapping {

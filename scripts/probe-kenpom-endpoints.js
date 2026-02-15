@@ -74,6 +74,22 @@ const ENDPOINTS = [
   "conference",
   // Scouting
   "scouting",
+  // Jump ball (from kenpom.com/jump_ball.php)
+  "jumpball",
+  "jump_ball",
+  // Gameplan / opponent-specific
+  "gameplan",
+  "game_plan",
+  // WAB (Wins Above Bubble)
+  "wab",
+  // Offensive/defensive breakdowns
+  "offense",
+  "defense",
+  // Misc from site pages
+  "fourfactors_o",
+  "fourfactors_d",
+  "teamstats_o",
+  "teamstats_d",
 ];
 
 function sleep(ms) {

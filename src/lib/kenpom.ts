@@ -168,7 +168,10 @@ const RATINGS_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const FANMATCH_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 const SUPPLEMENTAL_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-const ratingsCacheByseason = new Map<number, CacheEntry<Map<string, KenpomRating>>>();
+const ratingsCacheByseason = new Map<
+  number,
+  CacheEntry<Map<string, KenpomRating>>
+>();
 const fanMatchCache = new Map<string, CacheEntry<KenpomFanMatch[]>>();
 const pointDistCache = new Map<number, CacheEntry<KenpomPointDist[]>>();
 const heightCache = new Map<number, CacheEntry<KenpomHeight[]>>();
@@ -215,7 +218,7 @@ async function fetchKenpom<T>(params: Record<string, string>): Promise<T> {
  * Cached for 6 hours.
  */
 export async function getKenpomRatings(
-  season?: number,
+  season?: number
 ): Promise<Map<string, KenpomRating>> {
   const y = season ?? getCurrentKenpomSeason();
   const now = Date.now();
@@ -245,7 +248,7 @@ export async function getKenpomRatings(
  * Cached for 2 hours.
  */
 export async function getKenpomFanMatch(
-  date: string,
+  date: string
 ): Promise<KenpomFanMatch[]> {
   const now = Date.now();
   const cached = fanMatchCache.get(date);
@@ -270,7 +273,7 @@ export async function getKenpomFanMatch(
  * Uses the undocumented `endpoint=archive&d=YYYY-MM-DD` API.
  */
 export async function getKenpomArchiveRatings(
-  date: string,
+  date: string
 ): Promise<KenpomArchiveRating[]> {
   return fetchKenpom<KenpomArchiveRating[]>({
     endpoint: "archive",
@@ -284,7 +287,7 @@ export async function getKenpomArchiveRatings(
  * Cached for 24 hours.
  */
 export async function getKenpomPointDist(
-  season?: number,
+  season?: number
 ): Promise<KenpomPointDist[]> {
   const y = season ?? getCurrentKenpomSeason();
   const now = Date.now();
@@ -310,7 +313,7 @@ export async function getKenpomPointDist(
  * Cached for 24 hours.
  */
 export async function getKenpomHeight(
-  season?: number,
+  season?: number
 ): Promise<KenpomHeight[]> {
   const y = season ?? getCurrentKenpomSeason();
   const now = Date.now();
@@ -336,7 +339,7 @@ export async function getKenpomHeight(
  */
 export function lookupRating(
   ratings: Map<string, KenpomRating>,
-  teamName: string,
+  teamName: string
 ): KenpomRating | undefined {
   // Direct match
   const direct = ratings.get(teamName);
@@ -356,7 +359,9 @@ export function lookupRating(
   }
 
   // Log unmatched name for incremental improvement of mappings
-  console.warn(`[kenpom] Unmatched team name: "${teamName}" (normalized: "${normalized}")`);
+  console.warn(
+    `[kenpom] Unmatched team name: "${teamName}" (normalized: "${normalized}")`
+  );
   return undefined;
 }
 
@@ -370,31 +375,31 @@ const DB_TO_KENPOM: Record<string, string> = {
   // "St." vs "State" and other ESPN quirks
   "N.C. State": "NC State",
   "NC State": "NC State",
-  "UConn": "Connecticut",
-  "UCONN": "Connecticut",
-  "UMass": "Massachusetts",
+  UConn: "Connecticut",
+  UCONN: "Connecticut",
+  UMass: "Massachusetts",
   "Ole Miss": "Mississippi",
-  "Pitt": "Pittsburgh",
-  "PITT": "Pittsburgh",
-  "UCF": "Central Florida",
-  "USC": "Southern California",
-  "UNC": "North Carolina",
-  "UNLV": "UNLV",
-  "SMU": "SMU",
-  "LSU": "LSU",
-  "VCU": "VCU",
-  "UAB": "UAB",
-  "UTEP": "UTEP",
-  "UTSA": "UT San Antonio",
+  Pitt: "Pittsburgh",
+  PITT: "Pittsburgh",
+  UCF: "Central Florida",
+  USC: "Southern California",
+  UNC: "North Carolina",
+  UNLV: "UNLV",
+  SMU: "SMU",
+  LSU: "LSU",
+  VCU: "VCU",
+  UAB: "UAB",
+  UTEP: "UTEP",
+  UTSA: "UT San Antonio",
   "UT Arlington": "UT Arlington",
   "UT Martin": "Tennessee Martin",
-  "FIU": "FIU",
-  "LIU": "LIU Brooklyn",
-  "NIU": "Northern Illinois",
-  "SIU": "Southern Illinois",
+  FIU: "FIU",
+  LIU: "LIU Brooklyn",
+  NIU: "Northern Illinois",
+  SIU: "Southern Illinois",
   "SIU Edwardsville": "SIUE",
-  "UIC": "Illinois Chicago",
-  "IUPUI": "IUPUI",
+  UIC: "Illinois Chicago",
+  IUPUI: "IUPUI",
   "Miami (FL)": "Miami FL",
   "Miami (OH)": "Miami OH",
   "Saint Mary's": "Saint Mary's",
@@ -412,60 +417,60 @@ const DB_TO_KENPOM: Record<string, string> = {
   "Cal St. Bakersfield": "Cal St. Bakersfield",
   "Cal St. Fullerton": "Cal St. Fullerton",
   "Cal St. Northridge": "CSUN",
-  "Seattle": "Seattle",
+  Seattle: "Seattle",
   "Hawai'i": "Hawaii",
-  "Hawaii": "Hawaii",
+  Hawaii: "Hawaii",
   // Additional ESPN→KenPom mappings
-  "UNI": "Northern Iowa",
-  "ETSU": "East Tennessee St.",
-  "FGCU": "Florida Gulf Coast",
-  "UMBC": "UMBC",
-  "SIUE": "SIU Edwardsville",
+  UNI: "Northern Iowa",
+  ETSU: "East Tennessee St.",
+  FGCU: "Florida Gulf Coast",
+  UMBC: "UMBC",
+  SIUE: "SIU Edwardsville",
   "App State": "Appalachian St.",
   "Appalachian State": "Appalachian St.",
-  "BYU": "BYU",
-  "TCU": "TCU",
-  "UNF": "North Florida",
-  "UNCG": "UNC Greensboro",
-  "UNCW": "UNC Wilmington",
-  "UNCA": "UNC Asheville",
+  BYU: "BYU",
+  TCU: "TCU",
+  UNF: "North Florida",
+  UNCG: "UNC Greensboro",
+  UNCW: "UNC Wilmington",
+  UNCA: "UNC Asheville",
   "Central Connecticut": "Central Connecticut",
   "Central Connecticut State": "Central Connecticut",
   "Cal Poly": "Cal Poly",
-  "Iona": "Iona",
-  "Gonzaga": "Gonzaga",
+  Iona: "Iona",
+  Gonzaga: "Gonzaga",
   "Saint Louis": "Saint Louis",
   "St. Louis": "Saint Louis",
   "UNC Greensboro": "UNC Greensboro",
   "UNC Wilmington": "UNC Wilmington",
   "UNC Asheville": "UNC Asheville",
-  "NJIT": "NJIT",
-  "FAU": "Florida Atlantic",
-  "WKU": "Western Kentucky",
+  NJIT: "NJIT",
+  FAU: "Florida Atlantic",
+  WKU: "Western Kentucky",
   "Middle Tennessee": "Middle Tennessee",
-  "MTSU": "Middle Tennessee",
+  MTSU: "Middle Tennessee",
   "South Florida": "South Florida",
-  "USF": "South Florida",
+  USF: "South Florida",
   "North Texas": "North Texas",
-  "Louisiana": "Louisiana",
+  Louisiana: "Louisiana",
   "Louisiana-Lafayette": "Louisiana",
   "Louisiana-Monroe": "Louisiana Monroe",
   "Little Rock": "Little Rock",
-  "UALR": "Little Rock",
-  "Omaha": "Omaha",
+  UALR: "Little Rock",
+  Omaha: "Omaha",
   "Detroit Mercy": "Detroit Mercy",
-  "Detroit": "Detroit Mercy",
+  Detroit: "Detroit Mercy",
   "Green Bay": "Green Bay",
-  "Milwaukee": "Milwaukee",
+  Milwaukee: "Milwaukee",
   // Orphaned KenPom names (school rebrands, abbreviation differences)
-  "CSUN": "Cal St. Northridge",
-  "Indianapolis": "IUPUI", // rebranded from IUPUI → Indianapolis in 2024
-  "McNeese": "McNeese St.",
-  "Nicholls": "Nicholls St.",
+  CSUN: "Cal St. Northridge",
+  Indianapolis: "IUPUI", // rebranded from IUPUI → Indianapolis in 2024
+  McNeese: "McNeese St.",
+  Nicholls: "Nicholls St.",
   "Kansas City": "UMKC",
   "Saint Francis": "St. Francis PA",
   "Houston Christian": "Houston Baptist", // rebranded 2022
-  "Charleston": "College of Charleston",
+  Charleston: "College of Charleston",
   "Purdue Fort Wayne": "Fort Wayne", // also was IPFW
   "UT Rio Grande Valley": "Texas Pan American", // merged 2015
   "Queens (NC)": "Queens",
@@ -474,7 +479,7 @@ const DB_TO_KENPOM: Record<string, string> = {
   "Southeast Missouri St.": "Southeast Missouri",
 };
 
-function normalizeToKenpom(dbName: string): string {
+export function normalizeToKenpom(dbName: string): string {
   if (DB_TO_KENPOM[dbName]) return DB_TO_KENPOM[dbName];
 
   // ESPN often uses "State" — KenPom uses "St."

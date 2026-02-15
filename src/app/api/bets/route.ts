@@ -38,7 +38,7 @@ function oddsToPayoutMultiplier(odds: number): number {
 function calculateProfit(
   stake: number,
   odds: number,
-  result: BetResult,
+  result: BetResult
 ): number | null {
   if (result === "PENDING") return null;
   if (result === "PUSH") return 0;
@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
     if (!session?.user?.id) {
       return NextResponse.json(
         { success: false, error: "Authentication required" },
-        { status: 401 },
+        { status: 401 }
       );
     }
 
@@ -78,7 +78,10 @@ export async function GET(req: NextRequest) {
     // Validate date params
     const dateError = validateDateRange(from, to);
     if (dateError) {
-      return NextResponse.json({ success: false, error: dateError }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: dateError },
+        { status: 400 }
+      );
     }
 
     // Build where clause
@@ -88,8 +91,10 @@ export async function GET(req: NextRequest) {
     if (result && VALID_RESULTS.includes(result)) where.result = result;
     if (from || to) {
       where.gameDate = {};
-      if (from) (where.gameDate as Record<string, unknown>).gte = parseDateParam(from)!;
-      if (to) (where.gameDate as Record<string, unknown>).lte = parseDateParam(to)!;
+      if (from)
+        (where.gameDate as Record<string, unknown>).gte = parseDateParam(from)!;
+      if (to)
+        (where.gameDate as Record<string, unknown>).lte = parseDateParam(to)!;
     }
 
     const selectFields = {
@@ -119,7 +124,8 @@ export async function GET(req: NextRequest) {
         select: selectFields,
       });
 
-      const nextCursor = bets.length === limit ? bets[bets.length - 1].id : null;
+      const nextCursor =
+        bets.length === limit ? bets[bets.length - 1].id : null;
       return NextResponse.json({
         success: true,
         bets,
@@ -148,7 +154,7 @@ export async function GET(req: NextRequest) {
     console.error("[GET /api/bets]", error);
     return NextResponse.json(
       { success: false, error: "Failed to fetch bets" },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }
@@ -186,17 +192,23 @@ export async function POST(req: NextRequest) {
     if (!session?.user?.id) {
       return NextResponse.json(
         { success: false, error: "Authentication required" },
-        { status: 401 },
+        { status: 401 }
       );
     }
 
     const limited = applyRateLimit(req, authLimiter, session.user.id);
     if (limited) return limited;
 
-    if (features.SUBSCRIPTIONS_ACTIVE && !hasAccess(session.user.role, "betTracking")) {
+    if (
+      features.SUBSCRIPTIONS_ACTIVE &&
+      !hasAccess(session.user.role, "betTracking")
+    ) {
       return NextResponse.json(
-        { success: false, error: "Bet tracking requires a Premium subscription" },
-        { status: 403 },
+        {
+          success: false,
+          error: "Bet tracking requires a Premium subscription",
+        },
+        { status: 403 }
       );
     }
 
@@ -206,13 +218,13 @@ export async function POST(req: NextRequest) {
     if (!body.sport || !VALID_SPORTS.includes(body.sport)) {
       return NextResponse.json(
         { success: false, error: "Valid sport required (NFL, NCAAF, NCAAMB)" },
-        { status: 400 },
+        { status: 400 }
       );
     }
     if (!body.betType || !VALID_BET_TYPES.includes(body.betType)) {
       return NextResponse.json(
         { success: false, error: "Valid betType required" },
-        { status: 400 },
+        { status: 400 }
       );
     }
     if (!body.gameDate || !body.homeTeam || !body.awayTeam || !body.pickSide) {
@@ -221,13 +233,16 @@ export async function POST(req: NextRequest) {
           success: false,
           error: "gameDate, homeTeam, awayTeam, and pickSide are required",
         },
-        { status: 400 },
+        { status: 400 }
       );
     }
-    if (!body.stake || body.stake <= 0) {
+    if (!body.stake || body.stake <= 0 || body.stake > 100000) {
       return NextResponse.json(
-        { success: false, error: "stake must be a positive number" },
-        { status: 400 },
+        {
+          success: false,
+          error: "stake must be a positive number up to 100,000",
+        },
+        { status: 400 }
       );
     }
 
@@ -235,7 +250,42 @@ export async function POST(req: NextRequest) {
     if (odds > -100 && odds < 100) {
       return NextResponse.json(
         { success: false, error: "Invalid odds: must be >= 100 or <= -100" },
-        { status: 400 },
+        { status: 400 }
+      );
+    }
+    if (odds < -10000 || odds > 10000) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Invalid odds: must be between -10000 and +10000",
+        },
+        { status: 400 }
+      );
+    }
+
+    // Max length validation on string fields
+    if (body.homeTeam.length > 100 || body.awayTeam.length > 100) {
+      return NextResponse.json(
+        { success: false, error: "Team names must be 100 characters or fewer" },
+        { status: 400 }
+      );
+    }
+    if (body.pickSide.length > 20) {
+      return NextResponse.json(
+        { success: false, error: "pickSide must be 20 characters or fewer" },
+        { status: 400 }
+      );
+    }
+    if (body.sportsbook && body.sportsbook.length > 100) {
+      return NextResponse.json(
+        { success: false, error: "sportsbook must be 100 characters or fewer" },
+        { status: 400 }
+      );
+    }
+    if (body.notes && body.notes.length > 500) {
+      return NextResponse.json(
+        { success: false, error: "notes must be 500 characters or fewer" },
+        { status: 400 }
       );
     }
     const toWin = body.stake * oddsToPayoutMultiplier(odds);
@@ -269,7 +319,7 @@ export async function POST(req: NextRequest) {
     console.error("[POST /api/bets]", error);
     return NextResponse.json(
       { success: false, error: "Failed to create bet" },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }
@@ -288,7 +338,7 @@ export async function PATCH(req: NextRequest) {
     if (!session?.user?.id) {
       return NextResponse.json(
         { success: false, error: "Authentication required" },
-        { status: 401 },
+        { status: 401 }
       );
     }
 
@@ -300,7 +350,7 @@ export async function PATCH(req: NextRequest) {
     if (!body.id) {
       return NextResponse.json(
         { success: false, error: "Bet id is required" },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
@@ -317,7 +367,7 @@ export async function PATCH(req: NextRequest) {
         updateData.profit = calculateProfit(
           existing.stake,
           existing.oddsValue,
-          body.result,
+          body.result
         );
         updateData.gradedAt = body.result !== "PENDING" ? new Date() : null;
       }
@@ -331,7 +381,7 @@ export async function PATCH(req: NextRequest) {
     if (!updated) {
       return NextResponse.json(
         { success: false, error: "Bet not found" },
-        { status: 404 },
+        { status: 404 }
       );
     }
 
@@ -340,7 +390,7 @@ export async function PATCH(req: NextRequest) {
     console.error("[PATCH /api/bets]", error);
     return NextResponse.json(
       { success: false, error: "Failed to update bet" },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }

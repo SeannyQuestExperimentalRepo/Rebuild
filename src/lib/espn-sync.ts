@@ -53,7 +53,9 @@ export interface RefreshResult {
  * Fetch upcoming games with odds from ESPN and upsert into UpcomingGame table.
  * Also cleans up games older than 1 day.
  */
-export async function refreshUpcomingGames(sport: Sport): Promise<RefreshResult> {
+export async function refreshUpcomingGames(
+  sport: Sport
+): Promise<RefreshResult> {
   const games = await fetchUpcomingWithOdds(sport);
 
   // Fetch AP Top 25 rankings (NCAAMB/NCAAF only; empty map for NFL)
@@ -91,16 +93,18 @@ export async function refreshUpcomingGames(sport: Sport): Promise<RefreshResult>
     const isNeutralSite = neutralSiteMap.get(nsKey) ?? false;
 
     // Look up AP rankings — prefer ESPN team ID (reliable), fall back to name matching
-    const homeRank = apRankings.get(`espn:${g.homeTeam.espnId}`)
-      ?? apRankings.get(g.homeTeam.displayName)
-      ?? apRankings.get(homeTeam)
-      ?? g.homeTeam.rank
-      ?? null;
-    const awayRank = apRankings.get(`espn:${g.awayTeam.espnId}`)
-      ?? apRankings.get(g.awayTeam.displayName)
-      ?? apRankings.get(awayTeam)
-      ?? g.awayTeam.rank
-      ?? null;
+    const homeRank =
+      apRankings.get(`espn:${g.homeTeam.espnId}`) ??
+      apRankings.get(g.homeTeam.displayName) ??
+      apRankings.get(homeTeam) ??
+      g.homeTeam.rank ??
+      null;
+    const awayRank =
+      apRankings.get(`espn:${g.awayTeam.espnId}`) ??
+      apRankings.get(g.awayTeam.displayName) ??
+      apRankings.get(awayTeam) ??
+      g.awayTeam.rank ??
+      null;
 
     // Upsert with single retry for transient DB errors
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -144,7 +148,10 @@ export async function refreshUpcomingGames(sport: Sport): Promise<RefreshResult>
           await new Promise((r) => setTimeout(r, 1000));
           continue;
         }
-        console.warn(`[ESPN Sync] Upsert failed for ${awayTeam} @ ${homeTeam}:`, err);
+        console.warn(
+          `[ESPN Sync] Upsert failed for ${awayTeam} @ ${homeTeam}:`,
+          err
+        );
       }
     }
   }
@@ -162,7 +169,7 @@ export async function refreshUpcomingGames(sport: Sport): Promise<RefreshResult>
   });
 
   console.log(
-    `[ESPN Sync] ${sport}: fetched=${games.length}, upserted=${upserted}, cleaned=${cleaned}`,
+    `[ESPN Sync] ${sport}: fetched=${games.length}, upserted=${upserted}, cleaned=${cleaned}`
   );
 
   return { sport, fetched: games.length, upserted, cleaned };
@@ -186,7 +193,7 @@ export interface SyncResult {
  */
 export async function syncCompletedGames(
   sport: Sport,
-  date?: string,
+  date?: string
 ): Promise<SyncResult> {
   // Default to yesterday
   const targetDate =
@@ -237,7 +244,10 @@ export async function syncCompletedGames(
     }
 
     // Skip non-D1 / exhibition games to prevent phantom team pollution
-    if (isNonD1Team(game.homeTeam.displayName) || isNonD1Team(game.awayTeam.displayName)) {
+    if (
+      isNonD1Team(game.homeTeam.displayName) ||
+      isNonD1Team(game.awayTeam.displayName)
+    ) {
       skipped++;
       continue;
     }
@@ -258,8 +268,10 @@ export async function syncCompletedGames(
       gameDate: new Date(game.date),
       homeRank: game.homeTeam.rank,
       awayRank: game.awayTeam.rank,
-      homeCanonical: mapTeamToCanonical(game.homeTeam, sport) ?? game.homeTeam.displayName,
-      awayCanonical: mapTeamToCanonical(game.awayTeam, sport) ?? game.awayTeam.displayName,
+      homeCanonical:
+        mapTeamToCanonical(game.homeTeam, sport) ?? game.homeTeam.displayName,
+      awayCanonical:
+        mapTeamToCanonical(game.awayTeam, sport) ?? game.awayTeam.displayName,
       inlineSpread: game.inlineOdds?.spread ?? null,
       inlineOverUnder: game.inlineOdds?.overUnder ?? null,
       neutralSite: game.neutralSite,
@@ -273,8 +285,12 @@ export async function syncCompletedGames(
 
   // Phase 2: Batch lookup pre-game odds from UpcomingGame table
   // Build date ranges for all games, then fetch matching upcoming records in one query
-  const minDate = new Date(Math.min(...prepared.map((g) => g.gameDate.getTime())));
-  const maxDate = new Date(Math.max(...prepared.map((g) => g.gameDate.getTime())));
+  const minDate = new Date(
+    Math.min(...prepared.map((g) => g.gameDate.getTime()))
+  );
+  const maxDate = new Date(
+    Math.max(...prepared.map((g) => g.gameDate.getTime()))
+  );
   const rangeStart = new Date(minDate);
   rangeStart.setDate(rangeStart.getDate() - 1);
   const rangeEnd = new Date(maxDate);
@@ -285,20 +301,42 @@ export async function syncCompletedGames(
       sport,
       gameDate: { gte: rangeStart, lte: rangeEnd },
     },
-    select: { homeTeam: true, awayTeam: true, gameDate: true, spread: true, overUnder: true, moneylineHome: true, moneylineAway: true, fmHomePred: true, fmAwayPred: true, fmHomeWinProb: true },
+    select: {
+      homeTeam: true,
+      awayTeam: true,
+      gameDate: true,
+      spread: true,
+      overUnder: true,
+      moneylineHome: true,
+      moneylineAway: true,
+      fmHomePred: true,
+      fmAwayPred: true,
+      fmHomeWinProb: true,
+    },
   });
 
   // Index upcoming records for fast lookup
-  const oddsMap = new Map<string, {
-    spread: number | null; overUnder: number | null;
-    moneylineHome: number | null; moneylineAway: number | null;
-    fmHomePred: number | null; fmAwayPred: number | null; fmHomeWinProb: number | null;
-  }>();
+  const oddsMap = new Map<
+    string,
+    {
+      spread: number | null;
+      overUnder: number | null;
+      moneylineHome: number | null;
+      moneylineAway: number | null;
+      fmHomePred: number | null;
+      fmAwayPred: number | null;
+      fmHomeWinProb: number | null;
+    }
+  >();
   for (const u of upcomingRecords) {
     const entry = {
-      spread: u.spread, overUnder: u.overUnder,
-      moneylineHome: u.moneylineHome, moneylineAway: u.moneylineAway,
-      fmHomePred: u.fmHomePred, fmAwayPred: u.fmAwayPred, fmHomeWinProb: u.fmHomeWinProb,
+      spread: u.spread,
+      overUnder: u.overUnder,
+      moneylineHome: u.moneylineHome,
+      moneylineAway: u.moneylineAway,
+      fmHomePred: u.fmHomePred,
+      fmAwayPred: u.fmAwayPred,
+      fmHomeWinProb: u.fmHomeWinProb,
     };
     // Key by home+away+date (date normalized to YYYY-MM-DD)
     const dateKey = u.gameDate.toISOString().split("T")[0];
@@ -308,8 +346,14 @@ export async function syncCompletedGames(
     dayBefore.setDate(dayBefore.getDate() - 1);
     const dayAfter = new Date(u.gameDate);
     dayAfter.setDate(dayAfter.getDate() + 1);
-    oddsMap.set(`${u.homeTeam}|${u.awayTeam}|${dayBefore.toISOString().split("T")[0]}`, entry);
-    oddsMap.set(`${u.homeTeam}|${u.awayTeam}|${dayAfter.toISOString().split("T")[0]}`, entry);
+    oddsMap.set(
+      `${u.homeTeam}|${u.awayTeam}|${dayBefore.toISOString().split("T")[0]}`,
+      entry
+    );
+    oddsMap.set(
+      `${u.homeTeam}|${u.awayTeam}|${dayAfter.toISOString().split("T")[0]}`,
+      entry
+    );
   }
 
   // Phase 3: Batch find existing games (one query per sport)
@@ -328,24 +372,27 @@ export async function syncCompletedGames(
       where: { OR: dupeConditions },
       select: { gameDate: true, homeTeamId: true, awayTeamId: true },
     });
-    for (const e of existing) existingSet.add(makeKey(e.gameDate, e.homeTeamId, e.awayTeamId));
+    for (const e of existing)
+      existingSet.add(makeKey(e.gameDate, e.homeTeamId, e.awayTeamId));
   } else if (sport === "NCAAF") {
     const existing = await prisma.nCAAFGame.findMany({
       where: { OR: dupeConditions },
       select: { gameDate: true, homeTeamId: true, awayTeamId: true },
     });
-    for (const e of existing) existingSet.add(makeKey(e.gameDate, e.homeTeamId, e.awayTeamId));
+    for (const e of existing)
+      existingSet.add(makeKey(e.gameDate, e.homeTeamId, e.awayTeamId));
   } else if (sport === "NCAAMB") {
     const existing = await prisma.nCAAMBGame.findMany({
       where: { OR: dupeConditions },
       select: { gameDate: true, homeTeamId: true, awayTeamId: true },
     });
-    for (const e of existing) existingSet.add(makeKey(e.gameDate, e.homeTeamId, e.awayTeamId));
+    for (const e of existing)
+      existingSet.add(makeKey(e.gameDate, e.homeTeamId, e.awayTeamId));
   }
 
   // Phase 4: Filter out duplicates, build insert data, and batch create
   const newGames = prepared.filter(
-    (g) => !existingSet.has(makeKey(g.gameDate, g.homeTeamId, g.awayTeamId)),
+    (g) => !existingSet.has(makeKey(g.gameDate, g.homeTeamId, g.awayTeamId))
   );
   skipped += prepared.length - newGames.length;
 
@@ -355,7 +402,9 @@ export async function syncCompletedGames(
     if (sport === "NFL") {
       const data = newGames.map((g) => {
         const dateKey = g.gameDate.toISOString().split("T")[0];
-        const odds = oddsMap.get(`${g.homeCanonical}|${g.awayCanonical}|${dateKey}`);
+        const odds = oddsMap.get(
+          `${g.homeCanonical}|${g.awayCanonical}|${dateKey}`
+        );
         const spread = odds?.spread ?? g.inlineSpread;
         const overUnder = odds?.overUnder ?? g.inlineOverUnder;
         const season = getSeason(g.gameDate, sport);
@@ -363,14 +412,21 @@ export async function syncCompletedGames(
         return {
           season,
           week: getWeek(g.gameDate, sport, season),
-          dayOfWeek: g.gameDate.toLocaleDateString("en-US", { weekday: "long" }),
+          dayOfWeek: g.gameDate.toLocaleDateString("en-US", {
+            weekday: "long",
+          }),
           gameDate: g.gameDate,
           homeTeamId: g.homeTeamId,
           awayTeamId: g.awayTeamId,
           homeScore: g.homeScore,
           awayScore: g.awayScore,
           scoreDifference,
-          winnerId: scoreDifference > 0 ? g.homeTeamId : scoreDifference < 0 ? g.awayTeamId : null,
+          winnerId:
+            scoreDifference > 0
+              ? g.homeTeamId
+              : scoreDifference < 0
+                ? g.awayTeamId
+                : null,
           spread,
           overUnder,
           isNeutralSite: g.neutralSite,
@@ -378,12 +434,17 @@ export async function syncCompletedGames(
           ouResult: calculateOUResult(g.homeScore, g.awayScore, overUnder),
         };
       });
-      const result = await prisma.nFLGame.createMany({ data, skipDuplicates: true });
+      const result = await prisma.nFLGame.createMany({
+        data,
+        skipDuplicates: true,
+      });
       inserted = result.count;
     } else if (sport === "NCAAF") {
       const data = newGames.map((g) => {
         const dateKey = g.gameDate.toISOString().split("T")[0];
-        const odds = oddsMap.get(`${g.homeCanonical}|${g.awayCanonical}|${dateKey}`);
+        const odds = oddsMap.get(
+          `${g.homeCanonical}|${g.awayCanonical}|${dateKey}`
+        );
         const spread = odds?.spread ?? g.inlineSpread;
         const overUnder = odds?.overUnder ?? g.inlineOverUnder;
         const season = getSeason(g.gameDate, sport);
@@ -391,14 +452,21 @@ export async function syncCompletedGames(
         return {
           season,
           week: getWeek(g.gameDate, sport, season),
-          dayOfWeek: g.gameDate.toLocaleDateString("en-US", { weekday: "long" }),
+          dayOfWeek: g.gameDate.toLocaleDateString("en-US", {
+            weekday: "long",
+          }),
           gameDate: g.gameDate,
           homeTeamId: g.homeTeamId,
           awayTeamId: g.awayTeamId,
           homeScore: g.homeScore,
           awayScore: g.awayScore,
           scoreDifference,
-          winnerId: scoreDifference > 0 ? g.homeTeamId : scoreDifference < 0 ? g.awayTeamId : null,
+          winnerId:
+            scoreDifference > 0
+              ? g.homeTeamId
+              : scoreDifference < 0
+                ? g.awayTeamId
+                : null,
           homeRank: g.homeRank,
           awayRank: g.awayRank,
           isNeutralSite: g.neutralSite,
@@ -409,12 +477,17 @@ export async function syncCompletedGames(
           ouResult: calculateOUResult(g.homeScore, g.awayScore, overUnder),
         };
       });
-      const result = await prisma.nCAAFGame.createMany({ data, skipDuplicates: true });
+      const result = await prisma.nCAAFGame.createMany({
+        data,
+        skipDuplicates: true,
+      });
       inserted = result.count;
     } else if (sport === "NCAAMB") {
       const data = newGames.map((g) => {
         const dateKey = g.gameDate.toISOString().split("T")[0];
-        const odds = oddsMap.get(`${g.homeCanonical}|${g.awayCanonical}|${dateKey}`);
+        const odds = oddsMap.get(
+          `${g.homeCanonical}|${g.awayCanonical}|${dateKey}`
+        );
         const spread = odds?.spread ?? g.inlineSpread;
         const overUnder = odds?.overUnder ?? g.inlineOverUnder;
         const season = getSeason(g.gameDate, sport);
@@ -427,7 +500,12 @@ export async function syncCompletedGames(
           homeScore: g.homeScore,
           awayScore: g.awayScore,
           scoreDifference,
-          winnerId: scoreDifference > 0 ? g.homeTeamId : scoreDifference < 0 ? g.awayTeamId : null,
+          winnerId:
+            scoreDifference > 0
+              ? g.homeTeamId
+              : scoreDifference < 0
+                ? g.awayTeamId
+                : null,
           homeRank: g.homeRank,
           awayRank: g.awayRank,
           isNeutralSite: g.neutralSite,
@@ -443,13 +521,16 @@ export async function syncCompletedGames(
           ouResult: calculateOUResult(g.homeScore, g.awayScore, overUnder),
         };
       });
-      const result = await prisma.nCAAMBGame.createMany({ data, skipDuplicates: true });
+      const result = await prisma.nCAAMBGame.createMany({
+        data,
+        skipDuplicates: true,
+      });
       inserted = result.count;
     }
   }
 
   console.log(
-    `[ESPN Sync] ${sport} ${targetDate}: fetched=${games.length}, completed=${completed.length}, inserted=${inserted}, skipped=${skipped}`,
+    `[ESPN Sync] ${sport} ${targetDate}: fetched=${games.length}, completed=${completed.length}, inserted=${inserted}, skipped=${skipped}`
   );
 
   return { sport, fetched: games.length, inserted, skipped };
@@ -458,23 +539,36 @@ export async function syncCompletedGames(
 // ─── KenPom Enrichment ──────────────────────────────────────────────────────
 
 /**
- * Enrich NCAAMB games that are missing KenPom season ratings.
- * Fetches current KenPom ratings and updates NCAAMBGame rows where
- * homeAdjEM is null. Idempotent — safe to run multiple times.
+ * Enrich NCAAMB games that are missing KenPom ratings.
+ *
+ * Uses point-in-time (PIT) snapshots from KenpomSnapshot when available,
+ * so completed games get ratings as they were on the game date (no EOS bias).
+ * Falls back to live KenPom API for games where no snapshot exists.
+ *
+ * Idempotent — safe to run multiple times.
  */
-export async function enrichNCAAMBGamesWithKenpom(
-  season?: number,
-): Promise<{ enriched: number; notMatched: number }> {
-  const { getKenpomRatings, lookupRating } = await import("./kenpom");
+export async function enrichNCAAMBGamesWithKenpom(season?: number): Promise<{
+  enriched: number;
+  notMatched: number;
+  pitUsed: number;
+  liveUsed: number;
+}> {
+  const { getKenpomRatings, lookupRating, normalizeToKenpom } =
+    await import("./kenpom");
+  const { getKenpomPITBatch } = await import("./kenpom-pit");
 
   const targetSeason = season ?? getSeason(new Date(), "NCAAMB");
-  const ratings = await getKenpomRatings(targetSeason);
-  if (!ratings || ratings.size === 0) {
-    console.log(`[KenPom Enrich] No ratings available for season ${targetSeason}`);
-    return { enriched: 0, notMatched: 0 };
+
+  // Fetch live ratings as fallback
+  const liveRatings = await getKenpomRatings(targetSeason);
+  if (!liveRatings || liveRatings.size === 0) {
+    console.log(
+      `[KenPom Enrich] No ratings available for season ${targetSeason}`
+    );
+    return { enriched: 0, notMatched: 0, pitUsed: 0, liveUsed: 0 };
   }
 
-  // Find games missing KenPom data
+  // Find games missing KenPom data — include gameDate for PIT lookup
   const games = await prisma.nCAAMBGame.findMany({
     where: {
       season: targetSeason,
@@ -482,51 +576,136 @@ export async function enrichNCAAMBGamesWithKenpom(
     },
     select: {
       id: true,
+      gameDate: true,
       homeTeam: { select: { name: true } },
       awayTeam: { select: { name: true } },
     },
   });
 
   if (games.length === 0) {
-    console.log(`[KenPom Enrich] No games need enrichment for season ${targetSeason}`);
-    return { enriched: 0, notMatched: 0 };
+    console.log(
+      `[KenPom Enrich] No games need enrichment for season ${targetSeason}`
+    );
+    return { enriched: 0, notMatched: 0, pitUsed: 0, liveUsed: 0 };
   }
 
   let enriched = 0;
   let notMatched = 0;
+  let pitUsed = 0;
+  let liveUsed = 0;
 
+  // Group games by date for batch PIT lookups
+  const gamesByDate = new Map<string, typeof games>();
   for (const game of games) {
-    const homeR = lookupRating(ratings, game.homeTeam.name);
-    const awayR = lookupRating(ratings, game.awayTeam.name);
+    const dateStr = game.gameDate.toISOString().slice(0, 10);
+    const group = gamesByDate.get(dateStr) ?? [];
+    group.push(game);
+    gamesByDate.set(dateStr, group);
+  }
 
-    if (!homeR || !awayR) {
-      notMatched++;
-      continue;
+  for (const [dateStr, dateGames] of Array.from(gamesByDate.entries())) {
+    // Collect all team names for this date (normalized to KenPom naming)
+    const nameMap = new Map<string, string>(); // dbName → kenpomName
+    for (const g of dateGames) {
+      nameMap.set(g.homeTeam.name, normalizeToKenpom(g.homeTeam.name));
+      nameMap.set(g.awayTeam.name, normalizeToKenpom(g.awayTeam.name));
     }
+    const kenpomNames = Array.from(new Set(Array.from(nameMap.values())));
 
-    await prisma.nCAAMBGame.update({
-      where: { id: game.id },
-      data: {
-        homeKenpomRank: homeR.RankAdjEM,
-        awayKenpomRank: awayR.RankAdjEM,
-        homeAdjEM: homeR.AdjEM,
-        awayAdjEM: awayR.AdjEM,
-        homeAdjOE: homeR.AdjOE,
-        awayAdjOE: awayR.AdjOE,
-        homeAdjDE: homeR.AdjDE,
-        awayAdjDE: awayR.AdjDE,
-        homeAdjTempo: homeR.AdjTempo,
-        awayAdjTempo: awayR.AdjTempo,
-        isConferenceGame: homeR.ConfShort === awayR.ConfShort,
-      },
-    });
-    enriched++;
+    // Try PIT batch lookup for this date (using KenPom team names)
+    const pitMap = await getKenpomPITBatch(
+      kenpomNames,
+      new Date(dateStr),
+      targetSeason
+    );
+
+    for (const game of dateGames) {
+      const homeName = game.homeTeam.name;
+      const awayName = game.awayTeam.name;
+      const homeKenpomName = nameMap.get(homeName)!;
+      const awayKenpomName = nameMap.get(awayName)!;
+
+      // Prefer PIT snapshot (keyed by KenPom name), fall back to live ratings
+      const homePIT = pitMap.get(homeKenpomName);
+      const awayPIT = pitMap.get(awayKenpomName);
+      const homeLive = lookupRating(liveRatings, homeName);
+      const awayLive = lookupRating(liveRatings, awayName);
+
+      const homeR = homePIT ?? homeLive;
+      const awayR = awayPIT ?? awayLive;
+
+      if (!homeR || !awayR) {
+        notMatched++;
+        continue;
+      }
+
+      const usedPIT = !!(homePIT && awayPIT);
+      if (usedPIT) pitUsed++;
+      else liveUsed++;
+
+      // Normalize field access — PIT and live ratings have different field names
+      const homeAdjEM =
+        "adjEM" in homeR ? homeR.adjEM : (homeR as { AdjEM: number }).AdjEM;
+      const awayAdjEM =
+        "adjEM" in awayR ? awayR.adjEM : (awayR as { AdjEM: number }).AdjEM;
+      const homeAdjOE =
+        "adjOE" in homeR ? homeR.adjOE : (homeR as { AdjOE: number }).AdjOE;
+      const awayAdjOE =
+        "adjOE" in awayR ? awayR.adjOE : (awayR as { AdjOE: number }).AdjOE;
+      const homeAdjDE =
+        "adjDE" in homeR ? homeR.adjDE : (homeR as { AdjDE: number }).AdjDE;
+      const awayAdjDE =
+        "adjDE" in awayR ? awayR.adjDE : (awayR as { AdjDE: number }).AdjDE;
+      const homeAdjTempo =
+        "adjTempo" in homeR
+          ? homeR.adjTempo
+          : (homeR as { AdjTempo: number }).AdjTempo;
+      const awayAdjTempo =
+        "adjTempo" in awayR
+          ? awayR.adjTempo
+          : (awayR as { AdjTempo: number }).AdjTempo;
+      const homeRankEM =
+        "rankAdjEM" in homeR
+          ? homeR.rankAdjEM
+          : (homeR as { RankAdjEM: number }).RankAdjEM;
+      const awayRankEM =
+        "rankAdjEM" in awayR
+          ? awayR.rankAdjEM
+          : (awayR as { RankAdjEM: number }).RankAdjEM;
+      const homeConf =
+        "confShort" in homeR
+          ? homeR.confShort
+          : (homeR as { ConfShort: string }).ConfShort;
+      const awayConf =
+        "confShort" in awayR
+          ? awayR.confShort
+          : (awayR as { ConfShort: string }).ConfShort;
+
+      await prisma.nCAAMBGame.update({
+        where: { id: game.id },
+        data: {
+          homeKenpomRank: homeRankEM,
+          awayKenpomRank: awayRankEM,
+          homeAdjEM,
+          awayAdjEM,
+          homeAdjOE,
+          awayAdjOE,
+          homeAdjDE,
+          awayAdjDE,
+          homeAdjTempo,
+          awayAdjTempo,
+          isConferenceGame: homeConf === awayConf,
+        },
+      });
+      enriched++;
+    }
   }
 
   console.log(
-    `[KenPom Enrich] Season ${targetSeason}: enriched=${enriched}, notMatched=${notMatched}, total=${games.length}`,
+    `[KenPom Enrich] Season ${targetSeason}: enriched=${enriched}, notMatched=${notMatched}, ` +
+      `pitUsed=${pitUsed}, liveUsed=${liveUsed}, total=${games.length}`
   );
-  return { enriched, notMatched };
+  return { enriched, notMatched, pitUsed, liveUsed };
 }
 
 // ─── NCAAF SP+ Enrichment ────────────────────────────────────────────────────
@@ -536,7 +715,7 @@ export async function enrichNCAAMBGamesWithKenpom(
  * Mirrors enrichNCAAMBGamesWithKenpom() pattern.
  */
 export async function enrichNCAAFGamesWithSP(
-  season?: number,
+  season?: number
 ): Promise<{ enriched: number; notMatched: number }> {
   const { getCFBDRatings, lookupCFBDRating } = await import("./cfbd");
 
@@ -561,7 +740,9 @@ export async function enrichNCAAFGamesWithSP(
   });
 
   if (games.length === 0) {
-    console.log(`[SP+ Enrich] No games need enrichment for season ${targetSeason}`);
+    console.log(
+      `[SP+ Enrich] No games need enrichment for season ${targetSeason}`
+    );
     return { enriched: 0, notMatched: 0 };
   }
 
@@ -592,7 +773,7 @@ export async function enrichNCAAFGamesWithSP(
   }
 
   console.log(
-    `[SP+ Enrich] Season ${targetSeason}: enriched=${enriched}, notMatched=${notMatched}, total=${games.length}`,
+    `[SP+ Enrich] Season ${targetSeason}: enriched=${enriched}, notMatched=${notMatched}, total=${games.length}`
   );
   return { enriched, notMatched };
 }
@@ -603,7 +784,7 @@ export async function enrichNCAAFGamesWithSP(
 export function calculateSpreadResult(
   homeScore: number,
   awayScore: number,
-  spread: number | null,
+  spread: number | null
 ): SpreadResult | null {
   if (spread == null) return null;
   const margin = homeScore - awayScore + spread;
@@ -616,7 +797,7 @@ export function calculateSpreadResult(
 export function calculateOUResult(
   homeScore: number,
   awayScore: number,
-  overUnder: number | null,
+  overUnder: number | null
 ): OUResult | null {
   if (overUnder == null) return null;
   const total = homeScore + awayScore;
@@ -631,7 +812,7 @@ function getWeek(gameDate: Date, sport: Sport, season: number): string {
   // NFL/NCAAF: approximate week from season start (early September)
   const seasonStart = new Date(season, 8, 1); // Sep 1
   const diffDays = Math.floor(
-    (gameDate.getTime() - seasonStart.getTime()) / 86400000,
+    (gameDate.getTime() - seasonStart.getTime()) / 86400000
   );
   const week = Math.max(1, Math.ceil(diffDays / 7));
   return String(week);
@@ -661,14 +842,19 @@ async function getTeamIdMap(): Promise<Map<string, number>> {
  * Returns the team ID, or null only if creation fails.
  */
 async function resolveTeamId(
-  espnTeam: { espnId: string; displayName: string; shortName: string; abbreviation: string },
+  espnTeam: {
+    espnId: string;
+    displayName: string;
+    shortName: string;
+    abbreviation: string;
+  },
   sport: Sport,
-  teamIdMap: Map<string, number>,
+  teamIdMap: Map<string, number>
 ): Promise<number | null> {
   // 1. Standard canonical mapping (covers all known D1 teams)
   const canonical = mapTeamToCanonical(
     { ...espnTeam, score: 0, rank: null },
-    sport,
+    sport
   );
   if (canonical) {
     const id = teamIdMap.get(`${sport}:${canonical}`);
@@ -701,13 +887,13 @@ async function resolveTeamId(
     // Cache for future lookups
     teamIdMap.set(`${sport}:${espnTeam.displayName}`, newTeam.id);
     console.log(
-      `[ESPN Sync] Created non-D1 team: "${espnTeam.displayName}" (${espnTeam.abbreviation}) → ID ${newTeam.id}`,
+      `[ESPN Sync] Created non-D1 team: "${espnTeam.displayName}" (${espnTeam.abbreviation}) → ID ${newTeam.id}`
     );
     return newTeam.id;
   } catch (err) {
     console.warn(
       `[ESPN Sync] Failed to create team "${espnTeam.displayName}":`,
-      err,
+      err
     );
     return null;
   }
@@ -746,7 +932,7 @@ async function insertCompletedGame(
   homeRank: number | null = null,
   awayRank: number | null = null,
   spread: number | null = null,
-  overUnder: number | null = null,
+  overUnder: number | null = null
 ): Promise<boolean> {
   const season = getSeason(gameDate, sport);
   const week = getWeek(gameDate, sport, season);
@@ -855,8 +1041,10 @@ async function insertCompletedGame(
  */
 const TEAM_SCHEDULE_URLS: Record<Sport, string> = {
   NFL: "https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams",
-  NCAAF: "https://site.api.espn.com/apis/site/v2/sports/football/college-football/teams",
-  NCAAMB: "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams",
+  NCAAF:
+    "https://site.api.espn.com/apis/site/v2/sports/football/college-football/teams",
+  NCAAMB:
+    "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams",
   NBA: "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams",
 };
 
@@ -867,7 +1055,12 @@ interface ESPNTeamScheduleEvent {
     competitors: Array<{
       homeAway: "home" | "away";
       score?: { value?: number; displayValue?: string };
-      team: { id: string; displayName: string; shortDisplayName: string; abbreviation: string };
+      team: {
+        id: string;
+        displayName: string;
+        shortDisplayName: string;
+        abbreviation: string;
+      };
       curatedRank?: { current?: number };
     }>;
   }>;
@@ -884,7 +1077,7 @@ interface ESPNTeamScheduleResponse {
 export async function syncTeamSeason(
   sport: Sport,
   espnTeamId: string,
-  season: number,
+  season: number
 ): Promise<SyncResult> {
   const url = `${TEAM_SCHEDULE_URLS[sport]}/${espnTeamId}/schedule?season=${season}`;
 
@@ -909,7 +1102,7 @@ export async function syncTeamSeason(
 
   const events = data.events ?? [];
   const completed = events.filter(
-    (e) => e.competitions?.[0]?.status?.type?.state === "post",
+    (e) => e.competitions?.[0]?.status?.type?.state === "post"
   );
 
   if (completed.length === 0) {
@@ -924,11 +1117,17 @@ export async function syncTeamSeason(
     const comp = event.competitions[0];
     const homeComp = comp.competitors.find((c) => c.homeAway === "home");
     const awayComp = comp.competitors.find((c) => c.homeAway === "away");
-    if (!homeComp || !awayComp) { skipped++; continue; }
+    if (!homeComp || !awayComp) {
+      skipped++;
+      continue;
+    }
 
     const homeScore = homeComp.score?.value ?? null;
     const awayScore = awayComp.score?.value ?? null;
-    if (homeScore == null || awayScore == null) { skipped++; continue; }
+    if (homeScore == null || awayScore == null) {
+      skipped++;
+      continue;
+    }
 
     const homeESPN = {
       espnId: homeComp.team.id,
@@ -936,9 +1135,10 @@ export async function syncTeamSeason(
       shortName: homeComp.team.shortDisplayName,
       abbreviation: homeComp.team.abbreviation,
       score: homeScore,
-      rank: (homeComp.curatedRank?.current ?? 99) < 99
-        ? homeComp.curatedRank!.current!
-        : null,
+      rank:
+        (homeComp.curatedRank?.current ?? 99) < 99
+          ? homeComp.curatedRank!.current!
+          : null,
     };
     const awayESPN = {
       espnId: awayComp.team.id,
@@ -946,22 +1146,31 @@ export async function syncTeamSeason(
       shortName: awayComp.team.shortDisplayName,
       abbreviation: awayComp.team.abbreviation,
       score: awayScore,
-      rank: (awayComp.curatedRank?.current ?? 99) < 99
-        ? awayComp.curatedRank!.current!
-        : null,
+      rank:
+        (awayComp.curatedRank?.current ?? 99) < 99
+          ? awayComp.curatedRank!.current!
+          : null,
     };
 
     const homeId = await resolveTeamId(homeESPN, sport, teamIdMap);
     const awayId = await resolveTeamId(awayESPN, sport, teamIdMap);
-    if (!homeId || !awayId) { skipped++; continue; }
+    if (!homeId || !awayId) {
+      skipped++;
+      continue;
+    }
 
     const gameDate = new Date(event.date);
 
     try {
       const success = await insertCompletedGame(
-        sport, homeId, awayId,
-        homeScore, awayScore, gameDate,
-        homeESPN.rank, awayESPN.rank,
+        sport,
+        homeId,
+        awayId,
+        homeScore,
+        awayScore,
+        gameDate,
+        homeESPN.rank,
+        awayESPN.rank
       );
       if (success) inserted++;
       else skipped++;
@@ -971,7 +1180,7 @@ export async function syncTeamSeason(
   }
 
   console.log(
-    `[ESPN Sync] Team ${espnTeamId} season ${season}: completed=${completed.length}, inserted=${inserted}, skipped=${skipped}`,
+    `[ESPN Sync] Team ${espnTeamId} season ${season}: completed=${completed.length}, inserted=${inserted}, skipped=${skipped}`
   );
 
   return { sport, fetched: events.length, inserted, skipped };

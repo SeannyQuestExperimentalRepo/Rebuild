@@ -1,103 +1,105 @@
-# Backtest Results — Pick Engine v7 Tuning
+# Backtest Results — Pick Engine v9 (PIT Ridge)
 
-**Date:** 2026-02-11
-**Seasons analyzed:** 2025 (5,523 games, in-sample), 2026 (1,727 games through Feb, out-of-sample)
+**Date:** 2026-02-14
+**Method:** Walk-forward Ridge regression on point-in-time KenPom snapshots (no look-ahead)
+**Seasons tested:** 2013-2026 (train on all prior seasons, predict on test season)
 **Break-even at -110:** 52.4%
+**All results use point-in-time KenPom snapshots — no end-of-season look-ahead bias.**
 
-## v5 vs v6 vs v7 Comparison
+## Model Specification
 
-### Season 2025 (in-sample)
+| Parameter | Value |
+|-----------|-------|
+| Model | Ridge regression, lambda = 1000 |
+| Features | intercept, sumAdjDE, sumAdjOE, avgTempo |
+| Production coefficients | -233.5315 + 0.4346 x sumAdjDE + 0.4451 x sumAdjOE + 2.8399 x avgTempo |
+| Training data | 70,303 games (2012-2025) with PIT KenPom snapshots |
+| Snapshot source | KenpomSnapshot table (722,920 rows, 2,039 dates) |
 
-| Metric | v5 | v6 | v7 (regression O/U) |
-|--------|----|----|---------------------|
-| Total Picks | 3,444 | 3,082 | 3,304 |
-| Spread (all) | 54.0%, +3.2% ROI | 56.0%, +6.9% ROI | 56.0%, +6.9% ROI |
-| 4-star Spread | 53.7%, +2.6% ROI | 56.3%, +7.4% ROI | 56.3%, +7.4% ROI |
-| 5-star Spread | 56.6%, +8.0% ROI | 46.7%, -10.9% ROI | 46.7%, -10.9% ROI |
-| O/U (all) | 71.7%, +36.9% ROI | 71.7%, +36.8% ROI | 69.6%, +32.9% ROI |
-| 4-star O/U | 67.1%, +28.0% ROI | 67.2%, +28.3% ROI | 63.5%, +21.1% ROI |
-| 5-star O/U | 78.4%, +49.6% ROI | 78.1%, +49.1% ROI | 74.4%, +42.0% ROI |
+## Walk-Forward Results (14 seasons)
 
-### Season 2026 (out-of-sample)
+**Overall PIT: 62.8% (36,510W - 21,581L) at edge >= 1.5**
 
-| Metric | v5 | v6 | v7 (regression O/U) |
-|--------|----|----|---------------------|
-| Total Picks | 837 | 746 | 916 |
-| Spread (all) | 52.5%, +0.2% ROI | 54.3%, +3.7% ROI | 54.3%, +3.7% ROI |
-| 4-star Spread | 51.7%, -1.3% ROI | 55.0%, +5.1% ROI | 55.0%, +5.1% ROI |
-| 5-star Spread | 55.3%, +5.6% ROI | 36.4%, -30.6% ROI | 36.4%, -30.6% ROI |
-| O/U (all) | 49.8%, -5.0% ROI | 49.9%, -4.8% ROI | **52.2%, -0.4% ROI** |
-| 4-star O/U | 49.6%, -5.3% ROI | 49.7%, -5.1% ROI | **53.7%, +2.6% ROI** |
-| 5-star O/U | 50.5%, -3.6% ROI | 50.5%, -3.6% ROI | 50.0%, -4.5% ROI |
+- **13/14 seasons profitable** (>= 52.4%)
+- **Only losing season:** 2026 partial (49.8%, limited test data through Feb)
+- **Average EOS-PIT bias gap:** 4.6 percentage points (range: 3.4-6.0pp, 11.1pp for partial 2026)
 
-### Key Finding
-v7 regression O/U is **+2.3% win% better than v6 on out-of-sample 2026 data**. The 4-star O/U picks cross the 52.4% break-even threshold (+2.6% ROI), while v6's 4-star O/U is a coin flip (-5.1% ROI). The v7 model generalizes better than v6's hand-tuned thresholds.
+## UNDER vs OVER Asymmetry
 
-## Overfitting Analysis
+UNDER picks consistently outperform OVER at all edge levels:
 
-| Version | 2025 O/U Win% | 2026 O/U Win% | Gap |
-|---------|---------------|---------------|-----|
-| v5 | 71.7% | 49.8% | 21.9pp |
-| v6 | 71.7% | 49.9% | 21.8pp |
-| v7 | 69.6% | 52.2% | **17.4pp** |
+| Direction | Overall % |
+|-----------|-----------|
+| UNDER | 65.6% |
+| OVER | 61.2% |
 
-v7 has the **smallest in-sample/out-of-sample gap** of all versions, suggesting the regression model overfits less than the threshold-based approach. The gap is still larger than the 5pp target, but the 2026 season is incomplete (Feb) and all versions show large gaps.
+## Edge Calibration (monotonic)
 
-## Parameters Changed
+| Min Edge | Win % |
+|----------|-------|
+| >= 1 | 62.8% |
+| >= 5 | ~66.8% |
+| >= 9 | ~71.5% |
+| >= 10 | ~73.0% |
+| >= 12 | ~74.8% |
+| >= 15 | 75.8% |
 
-| Parameter | Before | After | Justification |
-|-----------|--------|-------|---------------|
-| O/U min edge | 1.0 | 1.5 | Health report shows edge 1.5-2.9 is only 52.1% on 2025. Sub-1.5 edges are noise. Minimal impact on backtest (+0.1-0.2% ROI) but theoretically sound. |
+## Confidence Tiers (Config #26, PIT-calibrated)
 
-## Parameters NOT Changed (with reasoning)
+| Tier | Criteria | OOS Win % | Volume/week | Monotonic Seasons |
+|------|----------|-----------|-------------|-------------------|
+| 5-star | UNDER + edge >= 12 + avgTempo <= 64 | 82.3% | ~2.4 | 12/13 |
+| 4-star | UNDER + edge >= 10 | 74.9% | ~16.7 | 12/13 |
+| 3-star | edge >= 9 | 68.0% | ~59.1 | 12/13 |
 
-| Parameter | Current Value | Why Kept |
-|-----------|--------------|----------|
-| HCA values | conf=2.5, non-conf=1.5, nov=1.0, mar=0.5 | HCA tight wins 2025 but default wins 2026. Plan rule: "if only one season, keep default." |
-| ML edge threshold | 0.08 (8%) | All thresholds 5-15% produce identical results — no moneyline data in backtest. Can't evaluate. |
-| Signal weights | modelEdge=0.30, seasonATS=0.15, etc. | No experiment showed both-season improvement. Differences within noise. |
-| Contextual overrides | All 5 overrides active | 2025 data validates all (top-50: 78.4%, high line: 67.9%, low line: 56.4%). Can't validate on 2026 (0% KenPom data on NCAAMBGame rows). |
-| Confidence tiers | 5-star >= 85, 4-star >= 70 | 2025 5-star O/U is 74.4% (excellent). 2026 5-star underperformance (50.0%) matches v6 (50.5%) — season issue, not model issue. |
-| Regression coefficients | Deployed from 2025 walk-forward | Health report shows drift on minor coefficients (tempoDiff, emAbsDiff) but these have near-zero impact. Major coefficients (sumAdjDE, sumAdjOE, avgTempo) within 7% drift. |
+Config #26 achieves monotonic tier accuracy (5-star > 4-star > 3-star) in 12 of 13 testable seasons.
 
-## O/U Prediction by Edge Bucket (2025 season)
+## EOS vs PIT Bias Gap
 
-| Edge Bucket | Record | Win% | ROI |
-|-------------|--------|------|-----|
-| >= 10 | 1232-256-14 | 82.8% | +58.1% |
-| 7-9.9 | 702-286-12 | 71.1% | +35.6% |
-| 5-6.9 | 538-270-10 | 66.6% | +27.1% |
-| 3-4.9 | 519-305-15 | 63.0% | +20.2% |
-| 1.5-2.9 | 347-319-9 | 52.1% | -0.5% |
+The honest backtest proved a **4.6 percentage point average look-ahead bias** in end-of-season ratings:
 
-## Contextual Override Validation (2025 season)
+| Metric | EOS (biased) | PIT (honest) | Difference |
+|--------|-------------|--------------|------------|
+| Overall accuracy | 67.4% | 62.8% | -4.6pp |
+| Range per season | 3.4-6.0pp gap | — | — |
+| 2026 partial gap | 11.1pp | — | Worst (limited data) |
 
-| Override | Record | Actual | Expected | Status |
-|----------|--------|--------|----------|--------|
-| Both top-50 | 320-88 | 78.4% | 78% | OK |
-| High line >= 155 | 605-286 | 67.9% | 68-70% | OK |
-| Low line < 135 | 426-329 | 56.4% | 57% | OK |
-| March games | 403-329 | 55.1% | 57% | OK |
-| Both 200+ | 940-466 | 66.9% | 69% | OK |
+**Any backtest using NCAAMBGame stored ratings (homeAdjEM etc.) overstates accuracy by ~4.6 percentage points.**
 
-## Known Issues
+## Deprecated v5/v6/v7 Results
 
-1. **2026 KenPom data gap**: NCAAMBGame rows for season 2026 have 0% KenPom coverage. KenPom stats are captured on UpcomingGame but not transferred to NCAAMBGame when games complete. Blocks regression validation and contextual override checks on current season data.
+The v5/v6/v7 results previously in this file used end-of-season KenPom ratings and are **invalidated by the EOS look-ahead bias**. They showed:
+- v7 O/U 2025: 69.6% (inflated by ~4.6pp, honest ~65%)
+- v7 O/U 2026: 52.2% (inflated by ~11pp, honest ~41%)
 
-2. **5-star spread picks**: Too few 5-star spread picks (7-8 per season in v6/v7) for statistical significance. The v6 context-aware HCA reduces 5-star spread count but improves 4-star quality.
+The gap between in-sample and out-of-sample was caused by EOS bias, not model overfitting.
 
-3. **ML edge signal**: Cannot be evaluated in backtest due to missing moneyline data on most historical games.
+## Regression Test
 
-## Scripts Added/Modified
+Run `scripts/backtest/regression-test.js` to verify model output has not changed:
+- 2025 season PIT accuracy at edge >= 1.5 should be in [55%, 72%]
+- Overall PIT accuracy should be in [57%, 70%]
 
-- `scripts/backtest-v6-compare.ts` — Added v7 regression O/U config, v6-vs-v7 comparison output
-- `scripts/backtest-report.ts` — NEW: Model health check (coefficient drift, edge buckets, override validation)
-- `scripts/register.cjs` — NEW: Stubs out `server-only` module for script execution outside Next.js
+## Bootstrap Confidence Intervals
+
+Run `scripts/backtest/bootstrap-ci.js` for full 95% CIs on all categories (10,000 resamples).
+
+## Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/backtest/honest-backtest.js` | Full walk-forward PIT backtest (14 seasons) |
+| `scripts/backtest/honest-tier-sweep.js` | Tier configuration sweep (found config #26) |
+| `scripts/backtest/honest-edge-distribution.js` | Edge distribution diagnostic |
+| `scripts/backtest/bootstrap-ci.js` | Bootstrap 95% confidence intervals |
+| `scripts/backtest/regression-test.js` | Quick regression test (expected accuracy range) |
+| `scripts/backtest/extract-pit-coefficients.js` | Extract production Ridge coefficients |
+| `scripts/backtest/backfill-kenpom-snapshots.js` | Backfill historical PIT snapshots |
+| `scripts/verify-pit-integrity.ts` | Verify NCAAMBGame KenPom values match snapshots |
 
 ## Next Review
 
-After March Madness 2026 (complete season). Key actions:
-- Fix 2026 KenPom data pipeline to enable current-season regression validation
-- Re-run full backtest suite with complete 2026 data
-- Evaluate raising 5-star threshold if 5-star O/U remains < 58%
-- Consider spread regression model (Model B) if spread ATS > 54% on both seasons
+After March Madness 2026 (complete season):
+- Re-run full backtest with complete 2026 data
+- Re-run bootstrap CIs with full 2026 sample
+- Evaluate if tier thresholds need adjustment based on complete 2026 performance

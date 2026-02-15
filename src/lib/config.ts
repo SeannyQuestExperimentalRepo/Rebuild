@@ -16,12 +16,12 @@ function getEnvVar(name: string, required = false): string | undefined {
 }
 
 export const config = {
-  // Database
-  databaseUrl: getEnvVar("DATABASE_URL"),
+  // Database — required, app crashes on startup if missing
+  databaseUrl: getEnvVar("DATABASE_URL", true),
 
-  // NextAuth (v5 uses AUTH_SECRET)
-  authSecret: getEnvVar("AUTH_SECRET"),
-  nextAuthUrl: getEnvVar("NEXTAUTH_URL"),
+  // NextAuth (v5 uses AUTH_SECRET) — required for auth to function
+  authSecret: getEnvVar("AUTH_SECRET", true),
+  nextAuthUrl: getEnvVar("NEXTAUTH_URL", true),
 
   // Google OAuth
   googleClientId: getEnvVar("GOOGLE_CLIENT_ID"),

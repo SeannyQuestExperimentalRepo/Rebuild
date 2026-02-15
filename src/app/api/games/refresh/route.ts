@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { refreshUpcomingGames } from "@/lib/espn-sync";
 import { publicLimiter, applyRateLimit } from "@/lib/rate-limit";
+import { verifyCronSecret } from "@/lib/auth-helpers";
 import { auth } from "@/../../auth";
 import type { Sport } from "@/lib/espn-api";
 
@@ -21,10 +22,9 @@ export async function POST(request: NextRequest) {
   const limited = applyRateLimit(request, publicLimiter);
   if (limited) return limited;
 
-  // Require either CRON_SECRET or authenticated session
-  const cronSecret = process.env.CRON_SECRET;
+  // Require either CRON_SECRET (timing-safe) or authenticated session
   const authHeader = request.headers.get("authorization");
-  const hasCronAuth = cronSecret && authHeader === `Bearer ${cronSecret}`;
+  const hasCronAuth = verifyCronSecret(authHeader);
 
   if (!hasCronAuth) {
     try {
@@ -32,13 +32,13 @@ export async function POST(request: NextRequest) {
       if (!session?.user) {
         return NextResponse.json(
           { success: false, error: "Unauthorized" },
-          { status: 401 },
+          { status: 401 }
         );
       }
     } catch {
       return NextResponse.json(
         { success: false, error: "Unauthorized" },
-        { status: 401 },
+        { status: 401 }
       );
     }
   }
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
   if (!sport || !VALID_SPORTS.includes(sport)) {
     return NextResponse.json(
       { success: false, error: "sport must be NFL, NCAAF, or NCAAMB" },
-      { status: 400 },
+      { status: 400 }
     );
   }
 
@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
     console.error(`[POST /api/games/refresh] Error for ${sport}:`, err);
     return NextResponse.json(
       { success: false, error: "Failed to refresh games" },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }

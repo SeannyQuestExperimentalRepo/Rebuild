@@ -24,7 +24,7 @@ function oddsToPayoutMultiplier(odds: number): number {
 function calculateProfit(
   stake: number,
   odds: number,
-  result: BetResult,
+  result: BetResult
 ): number | null {
   if (result === "PENDING") return null;
   if (result === "PUSH") return 0;
@@ -42,7 +42,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     if (!session?.user?.id) {
       return NextResponse.json(
         { success: false, error: "Authentication required" },
-        { status: 401 },
+        { status: 401 }
       );
     }
 
@@ -57,7 +57,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     if (!bet) {
       return NextResponse.json(
         { success: false, error: "Bet not found" },
-        { status: 404 },
+        { status: 404 }
       );
     }
 
@@ -66,7 +66,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     console.error("[GET /api/bets/:id]", error);
     return NextResponse.json(
       { success: false, error: "Failed to fetch bet" },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }
@@ -88,7 +88,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     if (!session?.user?.id) {
       return NextResponse.json(
         { success: false, error: "Authentication required" },
-        { status: 401 },
+        { status: 401 }
       );
     }
 
@@ -97,6 +97,40 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
 
     const { id } = await context.params;
     const body = (await req.json()) as PatchBody;
+
+    // Validate input bounds
+    if (body.stake !== undefined && (body.stake <= 0 || body.stake > 100000)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "stake must be a positive number up to 100,000",
+        },
+        { status: 400 }
+      );
+    }
+    if (body.oddsValue !== undefined) {
+      if (body.oddsValue > -100 && body.oddsValue < 100) {
+        return NextResponse.json(
+          { success: false, error: "Invalid odds: must be >= 100 or <= -100" },
+          { status: 400 }
+        );
+      }
+      if (body.oddsValue < -10000 || body.oddsValue > 10000) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Invalid odds: must be between -10000 and +10000",
+          },
+          { status: 400 }
+        );
+      }
+    }
+    if (body.sportsbook !== undefined && body.sportsbook.length > 100) {
+      return NextResponse.json(
+        { success: false, error: "sportsbook must be 100 characters or fewer" },
+        { status: 400 }
+      );
+    }
 
     // Use transaction to prevent TOCTOU race condition
     const updated = await prisma.$transaction(async (tx) => {
@@ -116,9 +150,10 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
         updateData.gradedAt = body.result !== "PENDING" ? new Date() : null;
       }
       if (body.notes !== undefined) {
-        updateData.notes = typeof body.notes === "string"
-          ? body.notes.slice(0, MAX_NOTES_LENGTH)
-          : body.notes;
+        updateData.notes =
+          typeof body.notes === "string"
+            ? body.notes.slice(0, MAX_NOTES_LENGTH)
+            : body.notes;
       }
       if (body.stake !== undefined && body.stake > 0) {
         updateData.stake = body.stake;
@@ -130,13 +165,16 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
         updateData.oddsValue = body.oddsValue;
         const stake = body.stake ?? existing.stake;
         updateData.toWin =
-          Math.round(stake * oddsToPayoutMultiplier(body.oddsValue) * 100) / 100;
+          Math.round(stake * oddsToPayoutMultiplier(body.oddsValue) * 100) /
+          100;
       }
-      if (body.sportsbook !== undefined) updateData.sportsbook = body.sportsbook;
+      if (body.sportsbook !== undefined)
+        updateData.sportsbook = body.sportsbook;
       if (body.line !== undefined) updateData.line = body.line;
 
       // Recalculate profit if stake/odds changed on an already-graded bet
-      const effectiveResult = (updateData.result as BetResult) ?? existing.result;
+      const effectiveResult =
+        (updateData.result as BetResult) ?? existing.result;
       if (
         effectiveResult !== "PENDING" &&
         !updateData.profit &&
@@ -153,7 +191,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     if (!updated) {
       return NextResponse.json(
         { success: false, error: "Bet not found" },
-        { status: 404 },
+        { status: 404 }
       );
     }
 
@@ -162,7 +200,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     console.error("[PATCH /api/bets/:id]", error);
     return NextResponse.json(
       { success: false, error: "Failed to update bet" },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }
@@ -175,7 +213,7 @@ export async function DELETE(_req: NextRequest, context: RouteContext) {
     if (!session?.user?.id) {
       return NextResponse.json(
         { success: false, error: "Authentication required" },
-        { status: 401 },
+        { status: 401 }
       );
     }
 
@@ -197,7 +235,7 @@ export async function DELETE(_req: NextRequest, context: RouteContext) {
     if (!deleted) {
       return NextResponse.json(
         { success: false, error: "Bet not found" },
-        { status: 404 },
+        { status: 404 }
       );
     }
 
@@ -206,7 +244,7 @@ export async function DELETE(_req: NextRequest, context: RouteContext) {
     console.error("[DELETE /api/bets/:id]", error);
     return NextResponse.json(
       { success: false, error: "Failed to delete bet" },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }
