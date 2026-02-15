@@ -15,10 +15,7 @@
  * ESPN API is unofficial (no key needed) but has been stable for years.
  */
 
-import { nflTeamNameMap } from "./team-name-mapping";
-import { ncaafTeamNameMap } from "./ncaaf-team-name-mapping";
-import { ncaambTeamNameMap } from "./ncaamb-team-name-mapping";
-import { espnOverrides } from "./espn-team-mapping";
+import { resolveTeamName } from "./team-resolver";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -59,8 +56,8 @@ export interface ESPNOdds {
 
 export interface ParsedGame extends ESPNGame {
   odds: ESPNOdds | null;
-  homeCanonical: string | null;
-  awayCanonical: string | null;
+  homeCanonical: string;
+  awayCanonical: string;
 }
 
 /** Lighter type for games from the odds endpoint (no scoreboard data needed) */
@@ -72,8 +69,8 @@ export interface UpcomingGameWithOdds {
   homeTeam: ESPNTeam;
   awayTeam: ESPNTeam;
   odds: ESPNOdds;
-  homeCanonical: string | null;
-  awayCanonical: string | null;
+  homeCanonical: string;
+  awayCanonical: string;
   neutralSite: boolean;
 }
 
@@ -81,15 +78,19 @@ export interface UpcomingGameWithOdds {
 
 const SCOREBOARD_URLS: Record<Sport, string> = {
   NFL: "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard",
-  NCAAF: "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard",
-  NCAAMB: "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard",
+  NCAAF:
+    "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard",
+  NCAAMB:
+    "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard",
   NBA: "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
 };
 
 const ODDS_URLS: Record<Sport, string> = {
   NFL: "https://site.web.api.espn.com/apis/v3/sports/football/nfl/odds",
-  NCAAF: "https://site.web.api.espn.com/apis/v3/sports/football/college-football/odds",
-  NCAAMB: "https://site.web.api.espn.com/apis/v3/sports/basketball/mens-college-basketball/odds",
+  NCAAF:
+    "https://site.web.api.espn.com/apis/v3/sports/football/college-football/odds",
+  NCAAMB:
+    "https://site.web.api.espn.com/apis/v3/sports/basketball/mens-college-basketball/odds",
   NBA: "https://site.web.api.espn.com/apis/v3/sports/basketball/nba/odds",
 };
 
@@ -121,14 +122,17 @@ async function fetchJSON<T>(url: string, retries = MAX_RETRIES): Promise<T> {
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
       // Don't retry 4xx client errors (except 429)
-      if (lastError.message.includes("ESPN API 4") && !lastError.message.includes("429")) {
+      if (
+        lastError.message.includes("ESPN API 4") &&
+        !lastError.message.includes("429")
+      ) {
         throw lastError;
       }
       if (attempt < retries - 1) {
         const delay = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s
         console.warn(
           `[ESPN] Fetch attempt ${attempt + 1}/${retries} failed, retrying in ${delay}ms:`,
-          lastError.message,
+          lastError.message
         );
         await new Promise((r) => setTimeout(r, delay));
       }
@@ -196,12 +200,13 @@ interface ESPNRawOddsInline {
  */
 export async function fetchScoreboard(
   sport: Sport,
-  date?: string,
+  date?: string
 ): Promise<ESPNGame[]> {
   let url = SCOREBOARD_URLS[sport];
   // groups=50 returns ALL D1 games (not just featured/top-25)
   // groups=80 for NCAAF FBS; NFL doesn't need groups
-  const groups = sport === "NCAAMB" ? "&groups=50" : sport === "NCAAF" ? "&groups=80" : "";
+  const groups =
+    sport === "NCAAMB" ? "&groups=50" : sport === "NCAAF" ? "&groups=80" : "";
   if (date) {
     const dateParam = date.replace(/-/g, "");
     url += `?dates=${dateParam}&limit=200${groups}`;
@@ -213,7 +218,9 @@ export async function fetchScoreboard(
     const data = await fetchJSON<ESPNScoreboardResponse>(url);
     if (!data.events) return [];
 
-    return data.events.map((event) => parseEvent(event)).filter(Boolean) as ESPNGame[];
+    return data.events
+      .map((event) => parseEvent(event))
+      .filter(Boolean) as ESPNGame[];
   } catch (err) {
     console.error(`[ESPN] Scoreboard fetch failed for ${sport}:`, err);
     return [];
@@ -332,7 +339,7 @@ interface ESPNRawOddsDetailed {
  */
 export async function fetchUpcomingWithOdds(
   sport: Sport,
-  date?: string,
+  date?: string
 ): Promise<UpcomingGameWithOdds[]> {
   let url = ODDS_URLS[sport];
   if (date) {
@@ -391,8 +398,8 @@ export async function fetchUpcomingWithOdds(
         homeTeam,
         awayTeam,
         odds,
-        homeCanonical: mapTeamToCanonical(homeTeam, sport),
-        awayCanonical: mapTeamToCanonical(awayTeam, sport),
+        homeCanonical: await mapTeamToCanonical(homeTeam, sport),
+        awayCanonical: await mapTeamToCanonical(awayTeam, sport),
         neutralSite: comp.neutralSite ?? false,
       });
     }
@@ -411,7 +418,9 @@ function parseDetailedOdds(raw: ESPNRawOddsDetailed): ESPNOdds | null {
 
   // Over/Under: strip "o" prefix, e.g., "o145.5" → 145.5
   const totalStr = raw.total?.over?.close?.line;
-  const overUnder = totalStr ? parseFloat(totalStr.replace(/^[ou]/i, "")) : null;
+  const overUnder = totalStr
+    ? parseFloat(totalStr.replace(/^[ou]/i, ""))
+    : null;
 
   // Moneylines: can be "OFF" or a number like "-180"
   const mlHomeStr = raw.moneyline?.home?.close?.odds;
@@ -442,7 +451,7 @@ function parseDetailedOdds(raw: ESPNRawOddsDetailed): ESPNOdds | null {
  */
 export async function fetchGamesWithOdds(
   sport: Sport,
-  date?: string,
+  date?: string
 ): Promise<ParsedGame[]> {
   // Fetch scoreboard and odds in parallel
   const dateParam = date?.replace(/-/g, "");
@@ -458,71 +467,41 @@ export async function fetchGamesWithOdds(
     oddsLookup.set(key, og.odds);
   }
 
-  return games.map((game) => {
+  const results: ParsedGame[] = [];
+  for (const game of games) {
     const key = `${game.awayTeam.abbreviation}@${game.homeTeam.abbreviation}`;
-    return {
+    results.push({
       ...game,
       odds: oddsLookup.get(key) ?? null,
-      homeCanonical: mapTeamToCanonical(game.homeTeam, sport),
-      awayCanonical: mapTeamToCanonical(game.awayTeam, sport),
-    };
-  });
+      homeCanonical: await mapTeamToCanonical(game.homeTeam, sport),
+      awayCanonical: await mapTeamToCanonical(game.awayTeam, sport),
+    });
+  }
+  return results;
 }
 
 // ─── Team Name Resolution ───────────────────────────────────────────────────
 
-const TEAM_MAPS: Record<Sport, Record<string, string>> = {
-  NFL: nflTeamNameMap,
-  NCAAF: ncaafTeamNameMap,
-  NCAAMB: ncaambTeamNameMap,
-  NBA: {},
-};
-
 /**
- * Map an ESPN team name to a TrendLine canonical name.
- * Tries: ESPN overrides → displayName → shortName → abbreviation → without mascot
+ * Map an ESPN team to the canonical DB name.
+ * Delegates to the unified team-resolver which handles alias table + fuzzy matching.
  */
-export function mapTeamToCanonical(
+export async function mapTeamToCanonical(
   team: ESPNTeam,
-  sport: Sport,
-): string | null {
-  const overrides = espnOverrides[sport] ?? {};
-  const mapping = TEAM_MAPS[sport];
-
-  // 1. Check ESPN-specific overrides first
-  if (overrides[team.displayName]) return overrides[team.displayName];
-  if (overrides[team.shortName]) return overrides[team.shortName];
-  if (overrides[team.abbreviation]) return overrides[team.abbreviation];
-
-  // 2. Try the main mapping (lowercase lookup)
-  const candidates = [
-    team.displayName,
-    team.shortName,
-    team.abbreviation,
-    // Try without mascot: "Ohio State Buckeyes" → "Ohio State"
-    team.displayName.replace(
-      /\s+(Buckeyes|Wolverines|Tigers|Bulldogs|Eagles|Bears|Lions|Panthers|Rams|49ers|Giants|Jets|Cowboys|Saints|Falcons|Broncos|Chiefs|Colts|Texans|Jaguars|Titans|Ravens|Bengals|Browns|Steelers|Bills|Dolphins|Patriots|Commanders|Packers|Vikings|Seahawks|Cardinals|Chargers|Raiders|Buccaneers|Huskies|Wildcats|Warriors|Mountaineers|Spartans|Hoosiers|Hawkeyes|Cyclones|Jayhawks|Sooners|Longhorns|Aggies|Razorbacks|Volunteers|Commodores|Gators|Seminoles|Hurricanes|Cavaliers|Hokies|Tar Heels|Wolfpack|Blue Devils|Demon Deacons|Yellow Jackets|Crimson Tide|War Eagle|Rebels|Gamecocks|Boilermakers|Badgers|Cornhuskers|Golden Gophers|Fighting Illini|Nittany Lions|Terrapins|Scarlet Knights|Red Storm|Musketeers|Friars|Bluejays|Hoyas|Pirates|Golden Eagles|Gaels|Bonnies|Ramblers|Explorers|Billikens|Flyers|Hawks|Dukes|Rams|Owls|Cougars|Miners|Roadrunners|Blazers|Panthers|Salukis|Sycamores|Redbirds|Braves|Penguins|Leathernecks|Jaguars|Bison|Midshipmen|Red Flash|Golden Lions)$/i,
-      "",
-    ),
-  ];
-
-  for (const name of candidates) {
-    const key = name.toLowerCase().trim();
-    if (mapping[key]) return mapping[key];
-  }
-
-  // 3. Log unresolved for debugging
-  console.warn(
-    `[ESPN] Unresolved team: "${team.displayName}" (${team.abbreviation}) for ${sport}`,
-  );
-  return null;
+  sport: Sport
+): Promise<string> {
+  // displayName is most descriptive ("Duke Blue Devils").
+  // The resolver handles mascot stripping, abbreviations, state/st, etc.
+  return resolveTeamName(team.displayName, sport, "espn");
 }
 
 // ─── AP Rankings ────────────────────────────────────────────────────────────
 
 const RANKINGS_URLS: Record<string, string> = {
-  NCAAMB: "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/rankings",
-  NCAAF: "https://site.api.espn.com/apis/site/v2/sports/football/college-football/rankings",
+  NCAAMB:
+    "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/rankings",
+  NCAAF:
+    "https://site.api.espn.com/apis/site/v2/sports/football/college-football/rankings",
 };
 
 /**
@@ -530,7 +509,9 @@ const RANKINGS_URLS: Record<string, string> = {
  * Returns a Map of team displayName → rank (1-25).
  * Works for NCAAMB and NCAAF. Returns empty map for NFL.
  */
-export async function fetchAPRankings(sport: Sport): Promise<Map<string, number>> {
+export async function fetchAPRankings(
+  sport: Sport
+): Promise<Map<string, number>> {
   const rankMap = new Map<string, number>();
   const url = RANKINGS_URLS[sport];
   if (!url) return rankMap;
@@ -541,7 +522,12 @@ export async function fetchAPRankings(sport: Sport): Promise<Map<string, number>
         name: string;
         ranks?: Array<{
           current: number;
-          team: { nickname: string; displayName?: string; location?: string; id: string };
+          team: {
+            nickname: string;
+            displayName?: string;
+            location?: string;
+            id: string;
+          };
         }>;
       }>;
     }>(url);

@@ -83,9 +83,8 @@ export async function refreshUpcomingGames(
     // Only store games with at least one useful odds field
     if (g.odds.spread == null && g.odds.overUnder == null) continue;
 
-    // Use canonical name if available, otherwise fall back to display name
-    const homeTeam = g.homeCanonical ?? g.homeTeam.displayName;
-    const awayTeam = g.awayCanonical ?? g.awayTeam.displayName;
+    const homeTeam = g.homeCanonical;
+    const awayTeam = g.awayCanonical;
     const gameDate = new Date(g.date);
 
     // Look up neutralSite from scoreboard data (odds API doesn't include it)
@@ -268,10 +267,8 @@ export async function syncCompletedGames(
       gameDate: new Date(game.date),
       homeRank: game.homeTeam.rank,
       awayRank: game.awayTeam.rank,
-      homeCanonical:
-        mapTeamToCanonical(game.homeTeam, sport) ?? game.homeTeam.displayName,
-      awayCanonical:
-        mapTeamToCanonical(game.awayTeam, sport) ?? game.awayTeam.displayName,
+      homeCanonical: await mapTeamToCanonical(game.homeTeam, sport),
+      awayCanonical: await mapTeamToCanonical(game.awayTeam, sport),
       inlineSpread: game.inlineOdds?.spread ?? null,
       inlineOverUnder: game.inlineOdds?.overUnder ?? null,
       neutralSite: game.neutralSite,
@@ -553,8 +550,7 @@ export async function enrichNCAAMBGamesWithKenpom(season?: number): Promise<{
   pitUsed: number;
   liveUsed: number;
 }> {
-  const { getKenpomRatings, lookupRating, normalizeToKenpom } =
-    await import("./kenpom");
+  const { getKenpomRatings, lookupRating } = await import("./kenpom");
   const { getKenpomPITBatch } = await import("./kenpom-pit");
 
   const targetSeason = season ?? getSeason(new Date(), "NCAAMB");
@@ -604,11 +600,15 @@ export async function enrichNCAAMBGamesWithKenpom(season?: number): Promise<{
   }
 
   for (const [dateStr, dateGames] of Array.from(gamesByDate.entries())) {
-    // Collect all team names for this date (normalized to KenPom naming)
+    // Collect all team names for this date
+    // liveRatings is keyed by DB canonical, but KenpomSnapshot stores KenPom API names.
+    // Extract the original KenPom TeamName from the rating object for PIT queries.
     const nameMap = new Map<string, string>(); // dbName → kenpomName
     for (const g of dateGames) {
-      nameMap.set(g.homeTeam.name, normalizeToKenpom(g.homeTeam.name));
-      nameMap.set(g.awayTeam.name, normalizeToKenpom(g.awayTeam.name));
+      const homeR = liveRatings.get(g.homeTeam.name);
+      const awayR = liveRatings.get(g.awayTeam.name);
+      nameMap.set(g.homeTeam.name, homeR?.TeamName ?? g.homeTeam.name);
+      nameMap.set(g.awayTeam.name, awayR?.TeamName ?? g.awayTeam.name);
     }
     const kenpomNames = Array.from(new Set(Array.from(nameMap.values())));
 
@@ -852,14 +852,12 @@ async function resolveTeamId(
   teamIdMap: Map<string, number>
 ): Promise<number | null> {
   // 1. Standard canonical mapping (covers all known D1 teams)
-  const canonical = mapTeamToCanonical(
+  const canonical = await mapTeamToCanonical(
     { ...espnTeam, score: 0, rank: null },
     sport
   );
-  if (canonical) {
-    const id = teamIdMap.get(`${sport}:${canonical}`);
-    if (id) return id;
-  }
+  const id = teamIdMap.get(`${sport}:${canonical}`);
+  if (id) return id;
 
   // 2. Check if we already created this team in a previous run (by display name)
   const existing = await prisma.team.findFirst({

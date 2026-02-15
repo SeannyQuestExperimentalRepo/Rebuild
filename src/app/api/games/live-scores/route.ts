@@ -14,7 +14,9 @@ import { VALID_SPORTS } from "@/lib/trend-engine";
 export const dynamic = "force-dynamic";
 
 function todayET(): string {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  return new Date().toLocaleDateString("en-CA", {
+    timeZone: "America/New_York",
+  });
 }
 
 export async function GET(req: NextRequest) {
@@ -27,7 +29,7 @@ export async function GET(req: NextRequest) {
   if (!sport || !VALID_SPORTS.includes(sport)) {
     return NextResponse.json(
       { success: false, error: "sport is required (NFL, NCAAF, NCAAMB)" },
-      { status: 400 },
+      { status: 400 }
     );
   }
 
@@ -35,15 +37,17 @@ export async function GET(req: NextRequest) {
     const games = await fetchScoreboard(sport as Sport, date);
 
     const sportKey = sport as Sport;
-    const scores = games.map((g) => ({
-      homeTeam: mapTeamToCanonical(g.homeTeam, sportKey) ?? g.homeTeam.displayName,
-      awayTeam: mapTeamToCanonical(g.awayTeam, sportKey) ?? g.awayTeam.displayName,
-      homeScore: g.homeTeam.score,
-      awayScore: g.awayTeam.score,
-      status: g.status,
-      statusDetail: g.statusDetail,
-      gameDate: g.date,
-    }));
+    const scores = await Promise.all(
+      games.map(async (g) => ({
+        homeTeam: await mapTeamToCanonical(g.homeTeam, sportKey),
+        awayTeam: await mapTeamToCanonical(g.awayTeam, sportKey),
+        homeScore: g.homeTeam.score,
+        awayScore: g.awayTeam.score,
+        status: g.status,
+        statusDetail: g.statusDetail,
+        gameDate: g.date,
+      }))
+    );
 
     return NextResponse.json(
       { success: true, sport, date, games: scores },
@@ -51,13 +55,13 @@ export async function GET(req: NextRequest) {
         headers: {
           "Cache-Control": "no-store",
         },
-      },
+      }
     );
   } catch (err) {
     console.error("[GET /api/games/live-scores]", err);
     return NextResponse.json(
       { success: false, error: "Failed to fetch live scores" },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }

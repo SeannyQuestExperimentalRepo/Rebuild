@@ -12,7 +12,7 @@
  */
 
 import { prisma } from "../src/lib/db";
-import { normalizeToKenpom } from "../src/lib/kenpom";
+import { getKenpomRatings } from "../src/lib/kenpom";
 
 const season = parseInt(process.argv[2] || "2026");
 const TOLERANCE = 0.01; // Allow tiny float rounding differences
@@ -79,11 +79,18 @@ async function main() {
   let gamesMatched = 0;
   let gamesWithMismatch = 0;
 
+  // Build DB canonical → KenPom name map from live ratings
+  const ratings = await getKenpomRatings(season);
+  const dbToKenpom = new Map<string, string>();
+  for (const [canonical, rating] of ratings) {
+    dbToKenpom.set(canonical, rating.TeamName);
+  }
+
   // 3. For each game, look up the PIT snapshot and compare
   for (const game of games) {
     const dateStr = game.gameDate.toISOString().slice(0, 10);
-    const homeName = normalizeToKenpom(game.homeTeam.name);
-    const awayName = normalizeToKenpom(game.awayTeam.name);
+    const homeName = dbToKenpom.get(game.homeTeam.name) ?? game.homeTeam.name;
+    const awayName = dbToKenpom.get(game.awayTeam.name) ?? game.awayTeam.name;
 
     // Find the most recent snapshot on or before the game date
     const [homeSnap, awaySnap] = await Promise.all([
@@ -201,9 +208,7 @@ async function main() {
   console.log(`Total field mismatches:  ${mismatches.length}`);
 
   if (mismatches.length > 0) {
-    console.log(
-      "\n─── Mismatches (first 20) ──────────────────────────"
-    );
+    console.log("\n─── Mismatches (first 20) ──────────────────────────");
     for (const m of mismatches.slice(0, 20)) {
       console.log(
         `  Game #${m.gameId} (${m.gameDate}) ${m.team} ${m.field}: ` +
@@ -217,8 +222,7 @@ async function main() {
 
     // Distribution of delta magnitudes
     const deltas = mismatches.map((m) => m.delta);
-    const avgDelta =
-      deltas.reduce((a, b) => a + b, 0) / deltas.length;
+    const avgDelta = deltas.reduce((a, b) => a + b, 0) / deltas.length;
     const maxDelta = Math.max(...deltas);
     console.log(
       `\n  Avg delta: ${avgDelta.toFixed(2)}, Max delta: ${maxDelta.toFixed(2)}`

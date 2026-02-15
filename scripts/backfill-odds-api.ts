@@ -25,17 +25,14 @@
  */
 
 import { PrismaClient, SpreadResult, OUResult } from "@prisma/client";
-import {
-  normalize,
-  matchOddsApiTeam,
-} from "../src/lib/odds-api-team-mapping";
+import { resolveTeamName, normalize } from "../src/lib/team-resolver";
 
 const prisma = new PrismaClient();
 
 function calculateSpreadResult(
   homeScore: number,
   awayScore: number,
-  spread: number | null,
+  spread: number | null
 ): SpreadResult | null {
   if (spread == null) return null;
   const margin = homeScore - awayScore + spread;
@@ -47,7 +44,7 @@ function calculateSpreadResult(
 function calculateOUResult(
   homeScore: number,
   awayScore: number,
-  overUnder: number | null,
+  overUnder: number | null
 ): OUResult | null {
   if (overUnder == null) return null;
   const total = homeScore + awayScore;
@@ -101,8 +98,10 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-// Team name matching imported from shared module
-const matchSingleTeam = matchOddsApiTeam;
+// Pre-resolve an Odds API name to canonical DB name
+async function resolveOdds(name: string): Promise<string> {
+  return resolveTeamName(name, "NCAAMB", "oddsapi");
+}
 
 // ─── Odds API ──────────────────────────────────────────────────────────────
 
@@ -113,9 +112,7 @@ const matchSingleTeam = matchOddsApiTeam;
  * Cost: 10 credits per market per region per request.
  * With markets=spreads,totals and regions=us → 20 credits/request.
  */
-async function fetchHistoricalOdds(
-  dateISO: string,
-): Promise<{
+async function fetchHistoricalOdds(dateISO: string): Promise<{
   games: OddsAPIGame[];
   creditsUsed: number;
   creditsRemaining: number;
@@ -128,13 +125,10 @@ async function fetchHistoricalOdds(
     throw new Error(`Odds API error ${res.status}: ${body}`);
   }
 
-  const creditsUsed = parseInt(
-    res.headers.get("x-requests-used") ?? "0",
-    10,
-  );
+  const creditsUsed = parseInt(res.headers.get("x-requests-used") ?? "0", 10);
   const creditsRemaining = parseInt(
     res.headers.get("x-requests-remaining") ?? "0",
-    10,
+    10
   );
 
   const data = await res.json();
@@ -148,9 +142,10 @@ async function fetchHistoricalOdds(
  * Extract the consensus spread and total from bookmakers.
  * Prefers DraftKings, then FanDuel, then BetMGM, then any book.
  */
-function extractOdds(
-  game: OddsAPIGame,
-): { spread: number | null; overUnder: number | null } {
+function extractOdds(game: OddsAPIGame): {
+  spread: number | null;
+  overUnder: number | null;
+} {
   const preferredBooks = [
     "draftkings",
     "fanduel",
@@ -170,7 +165,7 @@ function extractOdds(
       if (market.key === "spreads" && spread === null) {
         // Find home team spread
         const homeOutcome = market.outcomes.find(
-          (o) => normalize(o.name) === normalize(game.home_team),
+          (o) => normalize(o.name) === normalize(game.home_team)
         );
         if (homeOutcome?.point != null) {
           spread = homeOutcome.point;
@@ -193,14 +188,12 @@ function extractOdds(
       for (const market of book.markets) {
         if (market.key === "spreads" && spread === null) {
           const homeOutcome = market.outcomes.find(
-            (o) => normalize(o.name) === normalize(game.home_team),
+            (o) => normalize(o.name) === normalize(game.home_team)
           );
           if (homeOutcome?.point != null) spread = homeOutcome.point;
         }
         if (market.key === "totals" && overUnder === null) {
-          const overOutcome = market.outcomes.find(
-            (o) => o.name === "Over",
-          );
+          const overOutcome = market.outcomes.find((o) => o.name === "Over");
           if (overOutcome?.point != null) overUnder = overOutcome.point;
         }
       }
@@ -257,7 +250,7 @@ async function main() {
     `Top 5 dates: ${sortedDates
       .slice(0, 5)
       .map((d) => `${d} (${byDate.get(d)!.length} games)`)
-      .join(", ")}`,
+      .join(", ")}`
   );
   console.log(`Will process up to ${LIMIT} dates\n`);
 
@@ -289,17 +282,17 @@ async function main() {
       creditsRemaining = remaining;
 
       console.log(
-        `  API returned ${oddsGames.length} games | Credits used: ${creditsUsed}, remaining: ${remaining}`,
+        `  API returned ${oddsGames.length} games | Credits used: ${creditsUsed}, remaining: ${remaining}`
       );
 
       // Filter to only games whose commence_time matches the target date
       // (historical endpoint returns a snapshot of ALL upcoming games at that timestamp)
-      const filteredGames = oddsGames.filter(
-        (g) => g.commence_time?.startsWith(dateStr),
+      const filteredGames = oddsGames.filter((g) =>
+        g.commence_time?.startsWith(dateStr)
       );
 
       console.log(
-        `  Filtered to ${filteredGames.length}/${oddsGames.length} games on ${dateStr}`,
+        `  Filtered to ${filteredGames.length}/${oddsGames.length} games on ${dateStr}`
       );
 
       if (filteredGames.length === 0) {
@@ -315,21 +308,30 @@ async function main() {
           `  Sample API names: ${filteredGames
             .slice(0, 3)
             .map((g) => `"${g.home_team}" vs "${g.away_team}"`)
-            .join(", ")}`,
+            .join(", ")}`
         );
       }
 
       // 4. Match and update
+      // Pre-resolve odds API names to canonical
+      const oddsNameCache = new Map<string, string>();
+      for (const og of filteredGames) {
+        if (!oddsNameCache.has(og.home_team))
+          oddsNameCache.set(og.home_team, await resolveOdds(og.home_team));
+        if (!oddsNameCache.has(og.away_team))
+          oddsNameCache.set(og.away_team, await resolveOdds(og.away_team));
+      }
+
       let dayMatched = 0;
       for (const dbGame of dbGames) {
         const home = dbGame.homeTeam.name;
         const away = dbGame.awayTeam.name;
 
-        // Find matching odds game — both teams must match
+        // Find matching odds game — both teams must match via resolved canonical names
         const match = filteredGames.find(
           (og) =>
-            matchSingleTeam(og.home_team, home) &&
-            matchSingleTeam(og.away_team, away),
+            oddsNameCache.get(og.home_team) === home &&
+            oddsNameCache.get(og.away_team) === away
         );
 
         if (!match) {
@@ -346,17 +348,17 @@ async function main() {
         const spreadResult = calculateSpreadResult(
           dbGame.homeScore!,
           dbGame.awayScore!,
-          odds.spread,
+          odds.spread
         );
         const ouResult = calculateOUResult(
           dbGame.homeScore!,
           dbGame.awayScore!,
-          odds.overUnder,
+          odds.overUnder
         );
 
         if (DRY_RUN) {
           console.log(
-            `  [DRY] ${away} @ ${home}: spread=${odds.spread}, O/U=${odds.overUnder} → ${spreadResult}/${ouResult}`,
+            `  [DRY] ${away} @ ${home}: spread=${odds.spread}, O/U=${odds.overUnder} → ${spreadResult}/${ouResult}`
           );
         } else {
           await prisma.nCAAMBGame.update({
@@ -369,7 +371,7 @@ async function main() {
             },
           });
           console.log(
-            `  [OK] ${away} @ ${home}: spread=${odds.spread}, O/U=${odds.overUnder}`,
+            `  [OK] ${away} @ ${home}: spread=${odds.spread}, O/U=${odds.overUnder}`
           );
         }
         gamesUpdated++;
@@ -377,7 +379,7 @@ async function main() {
       }
 
       console.log(
-        `  → Matched ${dayMatched}/${dbGames.length} games on this date`,
+        `  → Matched ${dayMatched}/${dbGames.length} games on this date`
       );
 
       // Rate limit: ~1 request per second
@@ -390,7 +392,7 @@ async function main() {
         String(err).includes("429")
       ) {
         console.error(
-          "  API key invalid, insufficient credits, or rate limited. Stopping.",
+          "  API key invalid, insufficient credits, or rate limited. Stopping."
         );
         break;
       }
@@ -400,12 +402,14 @@ async function main() {
   }
 
   console.log(`\n=== Complete ===`);
-  console.log(`API requests made: ${requestsMade} (${requestsMade * 20} credits used)`);
+  console.log(
+    `API requests made: ${requestsMade} (${requestsMade * 20} credits used)`
+  );
   console.log(`Games updated: ${gamesUpdated}`);
   console.log(`Games not matched: ${gamesNotMatched}`);
   console.log(`Credits remaining: ${creditsRemaining}`);
   console.log(
-    `Games still needing data: ${gamesNeedingOdds.length - gamesUpdated}`,
+    `Games still needing data: ${gamesNeedingOdds.length - gamesUpdated}`
   );
 }
 

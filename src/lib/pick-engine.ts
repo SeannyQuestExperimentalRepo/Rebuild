@@ -188,47 +188,13 @@ const OU_WEIGHTS: Record<string, Record<string, number>> = {
 
 // ─── Team Name Resolution ────────────────────────────────────────────────────
 
-const NAME_ALIASES: Record<string, string> = {
-  "NC State": "N.C. State",
-  "Chicago State": "Chicago St.",
-  "Jackson State": "Jackson St.",
-  "Indiana State": "Indiana St.",
-  "Arkansas-Pine Bluff": "Arkansas Pine Bluff",
-  "Texas A&M-Corpus Christi": "Texas A&M Corpus Chris",
-  "Appalachian State": "Appalachian St.",
-  "Bethune-Cookman": "Bethune Cookman",
-  "Louisiana-Monroe": "Louisiana Monroe",
-  "Ole Miss": "Mississippi",
-  UConn: "Connecticut",
-  "Hawai'i": "Hawaii",
-};
+import { resolveTeamName } from "./team-resolver";
 
 async function resolveCanonicalName(
   name: string,
   sport: string
 ): Promise<string> {
-  const exact = await prisma.team.findFirst({
-    where: { sport: sport as Sport, name },
-    select: { name: true },
-  });
-  if (exact) return exact.name;
-
-  if (NAME_ALIASES[name]) return NAME_ALIASES[name];
-
-  const variants = [
-    name.replace(/ State$/, " St."),
-    name.replace(/-/g, " "),
-    name.replace(/ State$/, " St.").replace(/-/g, " "),
-  ];
-  for (const v of variants) {
-    const match = await prisma.team.findFirst({
-      where: { sport: sport as Sport, name: v },
-      select: { name: true },
-    });
-    if (match) return match.name;
-  }
-
-  return name;
+  return resolveTeamName(name, sport, "espn");
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

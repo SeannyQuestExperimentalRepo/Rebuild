@@ -14,7 +14,7 @@
 
 import { prisma } from "./db";
 import { fetchLiveOdds, type OddsGame } from "./odds-api";
-import { resolveOddsApiName, normalize, matchOddsApiTeam } from "./odds-api-team-mapping";
+import { resolveTeamName, normalize } from "./team-resolver";
 import { calculateSpreadResult, calculateOUResult } from "./espn-sync";
 import type { Sport } from "./espn-api";
 
@@ -57,7 +57,14 @@ interface HistoricalOddsGame {
 
 // ─── Odds Extraction ────────────────────────────────────────────────────────
 
-const PREFERRED_BOOKS = ["draftkings", "fanduel", "betmgm", "caesars", "pointsbetus", "bovada"];
+const PREFERRED_BOOKS = [
+  "draftkings",
+  "fanduel",
+  "betmgm",
+  "caesars",
+  "pointsbetus",
+  "bovada",
+];
 
 /** Extract DraftKings-preferred spread and total from an OddsGame (live API, camelCase). */
 function extractFromLiveGame(game: OddsGame): {
@@ -127,7 +134,7 @@ function extractFromHistoricalGame(game: HistoricalOddsGame): {
     for (const market of book.markets) {
       if (market.key === "spreads" && spread === null) {
         const home = market.outcomes.find(
-          (o) => normalize(o.name) === normalize(game.home_team),
+          (o) => normalize(o.name) === normalize(game.home_team)
         );
         if (home?.point != null) spread = home.point;
       }
@@ -145,7 +152,7 @@ function extractFromHistoricalGame(game: HistoricalOddsGame): {
       for (const market of book.markets) {
         if (market.key === "spreads" && spread === null) {
           const home = market.outcomes.find(
-            (o) => normalize(o.name) === normalize(game.home_team),
+            (o) => normalize(o.name) === normalize(game.home_team)
           );
           if (home?.point != null) spread = home.point;
         }
@@ -170,9 +177,15 @@ function extractFromHistoricalGame(game: HistoricalOddsGame): {
  * syncCompletedGames(). Never overwrites existing ESPN odds.
  */
 export async function supplementUpcomingGamesFromOddsApi(
-  sport: Sport = "NCAAMB",
+  sport: Sport = "NCAAMB"
 ): Promise<OddsApiSyncResult> {
-  const result: OddsApiSyncResult = { sport, fetched: 0, supplemented: 0, enriched: 0, skipped: 0 };
+  const result: OddsApiSyncResult = {
+    sport,
+    fetched: 0,
+    supplemented: 0,
+    enriched: 0,
+    skipped: 0,
+  };
 
   // Guard: skip if no API key
   const apiKey = process.env.THE_ODDS_API_KEY;
@@ -214,8 +227,16 @@ export async function supplementUpcomingGamesFromOddsApi(
 
   for (const game of oddsGames) {
     // Resolve Odds API names → canonical
-    const homeCanonical = resolveOddsApiName(game.homeTeam);
-    const awayCanonical = resolveOddsApiName(game.awayTeam);
+    const homeCanonical = await resolveTeamName(
+      game.homeTeam,
+      sport,
+      "oddsapi"
+    );
+    const awayCanonical = await resolveTeamName(
+      game.awayTeam,
+      sport,
+      "oddsapi"
+    );
 
     const gameDate = new Date(game.commenceTime);
     const dateKey = gameDate.toISOString().split("T")[0];
@@ -260,10 +281,16 @@ export async function supplementUpcomingGamesFromOddsApi(
         });
         result.supplemented++;
       } catch (err) {
-        console.warn(`[OddsAPI Sync] Upsert failed for ${awayCanonical} @ ${homeCanonical}:`, err);
+        console.warn(
+          `[OddsAPI Sync] Upsert failed for ${awayCanonical} @ ${homeCanonical}:`,
+          err
+        );
         result.skipped++;
       }
-    } else if (existingGame.spread === null || existingGame.overUnder === null) {
+    } else if (
+      existingGame.spread === null ||
+      existingGame.overUnder === null
+    ) {
       // ESPN has the game but missing odds — enrich
       try {
         await prisma.upcomingGame.update({
@@ -277,7 +304,10 @@ export async function supplementUpcomingGamesFromOddsApi(
         });
         result.enriched++;
       } catch (err) {
-        console.warn(`[OddsAPI Sync] Enrich failed for ${awayCanonical} @ ${homeCanonical}:`, err);
+        console.warn(
+          `[OddsAPI Sync] Enrich failed for ${awayCanonical} @ ${homeCanonical}:`,
+          err
+        );
         result.skipped++;
       }
     }
@@ -285,7 +315,7 @@ export async function supplementUpcomingGamesFromOddsApi(
   }
 
   console.log(
-    `[OddsAPI Sync] ${sport}: fetched=${result.fetched}, supplemented=${result.supplemented}, enriched=${result.enriched}, skipped=${result.skipped}`,
+    `[OddsAPI Sync] ${sport}: fetched=${result.fetched}, supplemented=${result.supplemented}, enriched=${result.enriched}, skipped=${result.skipped}`
   );
 
   return result;
@@ -301,11 +331,19 @@ export async function supplementUpcomingGamesFromOddsApi(
  * double-spending credits on the midday run.
  */
 export async function backfillYesterdayOdds(): Promise<BackfillResult> {
-  const result: BackfillResult = { updated: 0, notMatched: 0, creditsRemaining: null };
+  const result: BackfillResult = {
+    updated: 0,
+    notMatched: 0,
+    creditsRemaining: null,
+  };
 
   // Only run in morning window (before 10 AM ET)
   const etHour = parseInt(
-    new Date().toLocaleString("en-US", { timeZone: "America/New_York", hour: "numeric", hour12: false }),
+    new Date().toLocaleString("en-US", {
+      timeZone: "America/New_York",
+      hour: "numeric",
+      hour12: false,
+    })
   );
   if (etHour >= 10) {
     console.log("[OddsAPI Backfill] Skipping — only runs before 10 AM ET");
@@ -343,7 +381,9 @@ export async function backfillYesterdayOdds(): Promise<BackfillResult> {
     return result;
   }
 
-  console.log(`[OddsAPI Backfill] ${gamesNeedingOdds.length} games from ${yesterdayStr} need odds`);
+  console.log(
+    `[OddsAPI Backfill] ${gamesNeedingOdds.length} games from ${yesterdayStr} need odds`
+  );
 
   // Fetch historical odds for yesterday
   const sportKey = "basketball_ncaab";
@@ -354,7 +394,9 @@ export async function backfillYesterdayOdds(): Promise<BackfillResult> {
     const res = await fetch(url);
     if (!res.ok) {
       const text = await res.text();
-      console.error(`[OddsAPI Backfill] Historical fetch failed: ${res.status} ${text}`);
+      console.error(
+        `[OddsAPI Backfill] Historical fetch failed: ${res.status} ${text}`
+      );
       return result;
     }
 
@@ -372,21 +414,44 @@ export async function backfillYesterdayOdds(): Promise<BackfillResult> {
   }
 
   if (oddsGames.length === 0) {
-    console.log("[OddsAPI Backfill] No historical odds available for this date");
+    console.log(
+      "[OddsAPI Backfill] No historical odds available for this date"
+    );
     return result;
   }
 
   // Filter to only games whose commence_time matches yesterday
   // (historical endpoint returns a snapshot of ALL upcoming games at that timestamp)
-  const filteredGames = oddsGames.filter(
-    (g) => g.commence_time?.startsWith(yesterdayStr),
+  const filteredGames = oddsGames.filter((g) =>
+    g.commence_time?.startsWith(yesterdayStr)
   );
 
-  console.log(`[OddsAPI Backfill] API returned ${oddsGames.length} games, ${filteredGames.length} on ${yesterdayStr}`);
+  console.log(
+    `[OddsAPI Backfill] API returned ${oddsGames.length} games, ${filteredGames.length} on ${yesterdayStr}`
+  );
 
   if (filteredGames.length === 0) {
-    console.log("[OddsAPI Backfill] No games matched yesterday's date in snapshot");
+    console.log(
+      "[OddsAPI Backfill] No games matched yesterday's date in snapshot"
+    );
     return result;
+  }
+
+  // Pre-resolve all Odds API team names for matching
+  const oddsNameCache = new Map<string, string>();
+  for (const og of filteredGames) {
+    if (!oddsNameCache.has(og.home_team)) {
+      oddsNameCache.set(
+        og.home_team,
+        await resolveTeamName(og.home_team, "NCAAMB", "oddsapi")
+      );
+    }
+    if (!oddsNameCache.has(og.away_team)) {
+      oddsNameCache.set(
+        og.away_team,
+        await resolveTeamName(og.away_team, "NCAAMB", "oddsapi")
+      );
+    }
   }
 
   // Match and update
@@ -396,8 +461,8 @@ export async function backfillYesterdayOdds(): Promise<BackfillResult> {
 
     const match = filteredGames.find(
       (og) =>
-        matchOddsApiTeam(og.home_team, home) &&
-        matchOddsApiTeam(og.away_team, away),
+        oddsNameCache.get(og.home_team) === home &&
+        oddsNameCache.get(og.away_team) === away
     );
 
     if (!match) {
@@ -411,8 +476,16 @@ export async function backfillYesterdayOdds(): Promise<BackfillResult> {
       continue;
     }
 
-    const spreadResult = calculateSpreadResult(dbGame.homeScore!, dbGame.awayScore!, odds.spread);
-    const ouResult = calculateOUResult(dbGame.homeScore!, dbGame.awayScore!, odds.overUnder);
+    const spreadResult = calculateSpreadResult(
+      dbGame.homeScore!,
+      dbGame.awayScore!,
+      odds.spread
+    );
+    const ouResult = calculateOUResult(
+      dbGame.homeScore!,
+      dbGame.awayScore!,
+      odds.overUnder
+    );
 
     try {
       await prisma.nCAAMBGame.update({
@@ -426,13 +499,16 @@ export async function backfillYesterdayOdds(): Promise<BackfillResult> {
       });
       result.updated++;
     } catch (err) {
-      console.warn(`[OddsAPI Backfill] Update failed for ${away} @ ${home}:`, err);
+      console.warn(
+        `[OddsAPI Backfill] Update failed for ${away} @ ${home}:`,
+        err
+      );
       result.notMatched++;
     }
   }
 
   console.log(
-    `[OddsAPI Backfill] Updated ${result.updated}/${gamesNeedingOdds.length} games, ${result.notMatched} not matched`,
+    `[OddsAPI Backfill] Updated ${result.updated}/${gamesNeedingOdds.length} games, ${result.notMatched} not matched`
   );
 
   return result;

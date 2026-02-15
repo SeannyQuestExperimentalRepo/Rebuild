@@ -233,9 +233,12 @@ export async function getKenpomRatings(
     y: String(y),
   });
 
+  // Re-key by DB canonical name so lookups from game data work directly
+  const { resolveTeamName } = await import("./team-resolver");
   const map = new Map<string, KenpomRating>();
   for (const team of raw) {
-    map.set(team.TeamName, team);
+    const canonical = await resolveTeamName(team.TeamName, "NCAAMB", "kenpom");
+    map.set(canonical, team);
   }
 
   ratingsCacheByseason.set(y, { data: map, fetchedAt: now });
@@ -334,164 +337,15 @@ export async function getKenpomHeight(
 }
 
 /**
- * Look up a team's ratings by name. Handles fuzzy matching between
- * your DB canonical names and KenPom's naming convention.
+ * Look up a team's ratings by name.
+ * The ratings map is keyed by DB canonical names (re-keyed at fetch time),
+ * so this is a simple direct lookup.
  */
 export function lookupRating(
   ratings: Map<string, KenpomRating>,
   teamName: string
 ): KenpomRating | undefined {
-  // Direct match
-  const direct = ratings.get(teamName);
-  if (direct) return direct;
-
-  // Try common transformations
-  const normalized = normalizeToKenpom(teamName);
-  if (normalized !== teamName) {
-    const match = ratings.get(normalized);
-    if (match) return match;
-  }
-
-  // Fallback: case-insensitive match
-  const lower = teamName.toLowerCase();
-  for (const entry of Array.from(ratings.entries())) {
-    if (entry[0].toLowerCase() === lower) return entry[1];
-  }
-
-  // Log unmatched name for incremental improvement of mappings
-  console.warn(
-    `[kenpom] Unmatched team name: "${teamName}" (normalized: "${normalized}")`
-  );
-  return undefined;
-}
-
-// ─── Name Normalization ─────────────────────────────────────────────────────
-
-/**
- * Map DB canonical names → KenPom names.
- * Only needed for names that differ between ESPN/DB and KenPom.
- */
-const DB_TO_KENPOM: Record<string, string> = {
-  // "St." vs "State" and other ESPN quirks
-  "N.C. State": "NC State",
-  "NC State": "NC State",
-  UConn: "Connecticut",
-  UCONN: "Connecticut",
-  UMass: "Massachusetts",
-  "Ole Miss": "Mississippi",
-  Pitt: "Pittsburgh",
-  PITT: "Pittsburgh",
-  UCF: "Central Florida",
-  USC: "Southern California",
-  UNC: "North Carolina",
-  UNLV: "UNLV",
-  SMU: "SMU",
-  LSU: "LSU",
-  VCU: "VCU",
-  UAB: "UAB",
-  UTEP: "UTEP",
-  UTSA: "UT San Antonio",
-  "UT Arlington": "UT Arlington",
-  "UT Martin": "Tennessee Martin",
-  FIU: "FIU",
-  LIU: "LIU Brooklyn",
-  NIU: "Northern Illinois",
-  SIU: "Southern Illinois",
-  "SIU Edwardsville": "SIUE",
-  UIC: "Illinois Chicago",
-  IUPUI: "IUPUI",
-  "Miami (FL)": "Miami FL",
-  "Miami (OH)": "Miami OH",
-  "Saint Mary's": "Saint Mary's",
-  "St. Mary's": "Saint Mary's",
-  "St. John's": "St. John's",
-  "Saint Joseph's": "Saint Joseph's",
-  "St. Joseph's": "Saint Joseph's",
-  "Saint Peter's": "Saint Peter's",
-  "St. Peter's": "Saint Peter's",
-  "St. Bonaventure": "St. Bonaventure",
-  "Saint Bonaventure": "St. Bonaventure",
-  "Loyola Chicago": "Loyola Chicago",
-  "Loyola (MD)": "Loyola MD",
-  "Loyola Marymount": "Loyola Marymount",
-  "Cal St. Bakersfield": "Cal St. Bakersfield",
-  "Cal St. Fullerton": "Cal St. Fullerton",
-  "Cal St. Northridge": "CSUN",
-  Seattle: "Seattle",
-  "Hawai'i": "Hawaii",
-  Hawaii: "Hawaii",
-  // Additional ESPN→KenPom mappings
-  UNI: "Northern Iowa",
-  ETSU: "East Tennessee St.",
-  FGCU: "Florida Gulf Coast",
-  UMBC: "UMBC",
-  SIUE: "SIU Edwardsville",
-  "App State": "Appalachian St.",
-  "Appalachian State": "Appalachian St.",
-  BYU: "BYU",
-  TCU: "TCU",
-  UNF: "North Florida",
-  UNCG: "UNC Greensboro",
-  UNCW: "UNC Wilmington",
-  UNCA: "UNC Asheville",
-  "Central Connecticut": "Central Connecticut",
-  "Central Connecticut State": "Central Connecticut",
-  "Cal Poly": "Cal Poly",
-  Iona: "Iona",
-  Gonzaga: "Gonzaga",
-  "Saint Louis": "Saint Louis",
-  "St. Louis": "Saint Louis",
-  "UNC Greensboro": "UNC Greensboro",
-  "UNC Wilmington": "UNC Wilmington",
-  "UNC Asheville": "UNC Asheville",
-  NJIT: "NJIT",
-  FAU: "Florida Atlantic",
-  WKU: "Western Kentucky",
-  "Middle Tennessee": "Middle Tennessee",
-  MTSU: "Middle Tennessee",
-  "South Florida": "South Florida",
-  USF: "South Florida",
-  "North Texas": "North Texas",
-  Louisiana: "Louisiana",
-  "Louisiana-Lafayette": "Louisiana",
-  "Louisiana-Monroe": "Louisiana Monroe",
-  "Little Rock": "Little Rock",
-  UALR: "Little Rock",
-  Omaha: "Omaha",
-  "Detroit Mercy": "Detroit Mercy",
-  Detroit: "Detroit Mercy",
-  "Green Bay": "Green Bay",
-  Milwaukee: "Milwaukee",
-  // Orphaned KenPom names (school rebrands, abbreviation differences)
-  CSUN: "Cal St. Northridge",
-  Indianapolis: "IUPUI", // rebranded from IUPUI → Indianapolis in 2024
-  McNeese: "McNeese St.",
-  Nicholls: "Nicholls St.",
-  "Kansas City": "UMKC",
-  "Saint Francis": "St. Francis PA",
-  "Houston Christian": "Houston Baptist", // rebranded 2022
-  Charleston: "College of Charleston",
-  "Purdue Fort Wayne": "Fort Wayne", // also was IPFW
-  "UT Rio Grande Valley": "Texas Pan American", // merged 2015
-  "Queens (NC)": "Queens",
-  "East Texas A&M": "Texas A&M Commerce", // rebranded 2024
-  "Utah Tech": "Dixie St.", // rebranded 2022
-  "Southeast Missouri St.": "Southeast Missouri",
-};
-
-export function normalizeToKenpom(dbName: string): string {
-  if (DB_TO_KENPOM[dbName]) return DB_TO_KENPOM[dbName];
-
-  // ESPN often uses "State" — KenPom uses "St."
-  // But some names like "Saint Joseph's" stay as-is in KenPom
-  let name = dbName;
-
-  // "Appalachian State" → "Appalachian St."
-  if (name.endsWith(" State") && !name.startsWith("Saint")) {
-    name = name.replace(/ State$/, " St.");
-  }
-
-  return name;
+  return ratings.get(teamName);
 }
 
 // ─── Season Helper ──────────────────────────────────────────────────────────

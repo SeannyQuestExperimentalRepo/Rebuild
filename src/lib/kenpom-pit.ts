@@ -10,7 +10,7 @@ import "server-only";
  */
 
 import { prisma } from "./db";
-import { getKenpomRatings, lookupRating, type KenpomRating } from "./kenpom";
+import { getKenpomRatings, type KenpomRating } from "./kenpom";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -121,7 +121,7 @@ export async function getKenpomPITBatch(
   if (isToday(gameDate)) {
     const ratings = await getKenpomRatings(season);
     for (const name of teamNames) {
-      const r = lookupRating(ratings, name);
+      const r = ratings.get(name);
       if (r) {
         result.set(name, liveRatingToPIT(r, gameDate));
       }
@@ -227,7 +227,7 @@ async function getKenpomPITFromLive(
   season?: number
 ): Promise<PITRating | null> {
   const ratings = await getKenpomRatings(season);
-  const r = lookupRating(ratings, teamName);
+  const r = ratings.get(teamName);
   if (!r) return null;
   return liveRatingToPIT(r, new Date());
 }
